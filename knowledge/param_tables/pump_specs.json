@@ -1,0 +1,20 @@
+{
+  "description": "排水泵站水泵参数 - 常用潜水排污泵/轴流泵/混流泵",
+  "source": "GB/T 13008《混流泵、轴流泵技术条件》, CJ/T 401《潜水排污泵》",
+  "entries": [
+    {"type": "潜水排污泵", "model": "WQ50-20-15", "flow_m3h": 50, "head_m": 20, "power_kw": 15, "speed_rpm": 1450, "inlet_mm": 100, "outlet_mm": 80, "weight_kg": 280, "application": "小区排水"},
+    {"type": "潜水排污泵", "model": "WQ100-15-22", "flow_m3h": 100, "head_m": 15, "power_kw": 22, "speed_rpm": 1450, "inlet_mm": 150, "outlet_mm": 100, "weight_kg": 420, "application": "市政管网"},
+    {"type": "潜水排污泵", "model": "WQ200-12-37", "flow_m3h": 200, "head_m": 12, "power_kw": 37, "speed_rpm": 980, "inlet_mm": 200, "outlet_mm": 150, "weight_kg": 650, "application": "雨水泵站"},
+    {"type": "潜水排污泵", "model": "WQ400-10-55", "flow_m3h": 400, "head_m": 10, "power_kw": 55, "speed_rpm": 740, "inlet_mm": 250, "outlet_mm": 200, "weight_kg": 1100, "application": "雨水泵站"},
+    {"type": "潜水排污泵", "model": "WQ600-8-75", "flow_m3h": 600, "head_m": 8, "power_kw": 75, "speed_rpm": 740, "inlet_mm": 300, "outlet_mm": 250, "weight_kg": 1500, "application": "大型泵站"},
+    {"type": "潜水排污泵", "model": "WQ1000-10-110", "flow_m3h": 1000, "head_m": 10, "power_kw": 110, "speed_rpm": 590, "inlet_mm": 400, "outlet_mm": 300, "weight_kg": 2500, "application": "大型泵站"},
+    {"type": "潜水排污泵", "model": "WQ2000-8-160", "flow_m3h": 2000, "head_m": 8, "power_kw": 160, "speed_rpm": 490, "inlet_mm": 500, "outlet_mm": 400, "weight_kg": 3800, "application": "防洪泵站"},
+    {"type": "轴流泵", "model": "ZLB350-4-30", "flow_m3h": 1200, "head_m": 4, "power_kw": 30, "speed_rpm": 980, "inlet_mm": 350, "outlet_mm": 350, "weight_kg": 900, "application": "排涝泵站"},
+    {"type": "轴流泵", "model": "ZLB500-5-55", "flow_m3h": 2500, "head_m": 5, "power_kw": 55, "speed_rpm": 740, "inlet_mm": 500, "outlet_mm": 500, "weight_kg": 1800, "application": "排涝泵站"},
+    {"type": "轴流泵", "model": "ZLB700-4-90", "flow_m3h": 5000, "head_m": 4, "power_kw": 90, "speed_rpm": 590, "inlet_mm": 700, "outlet_mm": 700, "weight_kg": 3500, "application": "大型排涝"},
+    {"type": "轴流泵", "model": "ZLB1000-5-160", "flow_m3h": 8000, "head_m": 5, "power_kw": 160, "speed_rpm": 490, "inlet_mm": 1000, "outlet_mm": 1000, "weight_kg": 6000, "application": "大型排涝"},
+    {"type": "混流泵", "model": "HLB350-8-37", "flow_m3h": 1000, "head_m": 8, "power_kw": 37, "speed_rpm": 980, "inlet_mm": 350, "outlet_mm": 300, "weight_kg": 1100, "application": "灌溉排涝"},
+    {"type": "混流泵", "model": "HLB500-10-75", "flow_m3h": 2000, "head_m": 10, "power_kw": 75, "speed_rpm": 740, "inlet_mm": 500, "outlet_mm": 400, "weight_kg": 2200, "application": "灌溉排涝"},
+    {"type": "混流泵", "model": "HLB700-12-132", "flow_m3h": 4000, "head_m": 12, "power_kw": 132, "speed_rpm": 590, "inlet_mm": 700, "outlet_mm": 600, "weight_kg": 4500, "application": "大型泵站"}
+  ]
+}

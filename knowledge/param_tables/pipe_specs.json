@@ -1,0 +1,27 @@
+{
+  "description": "排水管道规格表 - 常用管径及水力参数",
+  "source": "GB/T 11836《混凝土和钢筋混凝土排水管》, CJ/T 225《HDPE双壁波纹管》",
+  "entries": [
+    {"material": "钢筋混凝土管", "dn_mm": 300, "wall_mm": 30, "inner_mm": 240, "weight_kg_m": 75, "max_depth_m": 6, "manning_n": 0.014, "standard": "GB/T 11836 I级"},
+    {"material": "钢筋混凝土管", "dn_mm": 400, "wall_mm": 40, "inner_mm": 320, "weight_kg_m": 130, "max_depth_m": 6, "manning_n": 0.014, "standard": "GB/T 11836 I级"},
+    {"material": "钢筋混凝土管", "dn_mm": 500, "wall_mm": 50, "inner_mm": 400, "weight_kg_m": 200, "max_depth_m": 6, "manning_n": 0.014, "standard": "GB/T 11836 I级"},
+    {"material": "钢筋混凝土管", "dn_mm": 600, "wall_mm": 60, "inner_mm": 480, "weight_kg_m": 290, "max_depth_m": 6, "manning_n": 0.014, "standard": "GB/T 11836 II级"},
+    {"material": "钢筋混凝土管", "dn_mm": 800, "wall_mm": 70, "inner_mm": 660, "weight_kg_m": 490, "max_depth_m": 7, "manning_n": 0.014, "standard": "GB/T 11836 II级"},
+    {"material": "钢筋混凝土管", "dn_mm": 1000, "wall_mm": 85, "inner_mm": 830, "weight_kg_m": 760, "max_depth_m": 7, "manning_n": 0.014, "standard": "GB/T 11836 II级"},
+    {"material": "钢筋混凝土管", "dn_mm": 1200, "wall_mm": 100, "inner_mm": 1000, "weight_kg_m": 1100, "max_depth_m": 8, "manning_n": 0.014, "standard": "GB/T 11836 III级"},
+    {"material": "钢筋混凝土管", "dn_mm": 1500, "wall_mm": 120, "inner_mm": 1260, "weight_kg_m": 1700, "max_depth_m": 8, "manning_n": 0.014, "standard": "GB/T 11836 III级"},
+    {"material": "钢筋混凝土管", "dn_mm": 2000, "wall_mm": 155, "inner_mm": 1690, "weight_kg_m": 3000, "max_depth_m": 10, "manning_n": 0.014, "standard": "GB/T 11836 III级"},
+    {"material": "HDPE双壁波纹管", "dn_mm": 300, "wall_mm": 12, "inner_mm": 276, "weight_kg_m": 6, "max_depth_m": 6, "manning_n": 0.010, "standard": "CJ/T 225 SN8"},
+    {"material": "HDPE双壁波纹管", "dn_mm": 400, "wall_mm": 15, "inner_mm": 370, "weight_kg_m": 10, "max_depth_m": 6, "manning_n": 0.010, "standard": "CJ/T 225 SN8"},
+    {"material": "HDPE双壁波纹管", "dn_mm": 500, "wall_mm": 18, "inner_mm": 464, "weight_kg_m": 15, "max_depth_m": 6, "manning_n": 0.010, "standard": "CJ/T 225 SN8"},
+    {"material": "HDPE双壁波纹管", "dn_mm": 600, "wall_mm": 22, "inner_mm": 556, "weight_kg_m": 22, "max_depth_m": 7, "manning_n": 0.010, "standard": "CJ/T 225 SN8"},
+    {"material": "HDPE双壁波纹管", "dn_mm": 800, "wall_mm": 28, "inner_mm": 744, "weight_kg_m": 38, "max_depth_m": 7, "manning_n": 0.010, "standard": "CJ/T 225 SN8"},
+    {"material": "HDPE双壁波纹管", "dn_mm": 1000, "wall_mm": 35, "inner_mm": 930, "weight_kg_m": 58, "max_depth_m": 8, "manning_n": 0.010, "standard": "CJ/T 225 SN8"},
+    {"material": "球墨铸铁管", "dn_mm": 300, "wall_mm": 7, "inner_mm": 286, "weight_kg_m": 50, "max_depth_m": 6, "manning_n": 0.013, "standard": "GB/T 13295 K9"},
+    {"material": "球墨铸铁管", "dn_mm": 400, "wall_mm": 8, "inner_mm": 384, "weight_kg_m": 78, "max_depth_m": 6, "manning_n": 0.013, "standard": "GB/T 13295 K9"},
+    {"material": "球墨铸铁管", "dn_mm": 500, "wall_mm": 9, "inner_mm": 482, "weight_kg_m": 112, "max_depth_m": 6, "manning_n": 0.013, "standard": "GB/T 13295 K9"},
+    {"material": "球墨铸铁管", "dn_mm": 600, "wall_mm": 10, "inner_mm": 580, "weight_kg_m": 152, "max_depth_m": 7, "manning_n": 0.013, "standard": "GB/T 13295 K9"},
+    {"material": "球墨铸铁管", "dn_mm": 800, "wall_mm": 12, "inner_mm": 776, "weight_kg_m": 242, "max_depth_m": 7, "manning_n": 0.013, "standard": "GB/T 13295 K9"},
+    {"material": "球墨铸铁管", "dn_mm": 1000, "wall_mm": 14, "inner_mm": 972, "weight_kg_m": 355, "max_depth_m": 8, "manning_n": 0.013, "standard": "GB/T 13295 K9"}
+  ]
+}

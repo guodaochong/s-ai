@@ -1,0 +1,22 @@
+{
+  "description": "曼宁糙率系数 (Manning's roughness coefficient) - 用于明渠和管道水流计算",
+  "unit": "无量纲",
+  "source": "《水力计算手册》及SL标准",
+  "entries": [
+    {"surface": "混凝土渠道", "channel_type": "衬砌", "condition": "光滑", "n_min": 0.011, "n_max": 0.015, "n_typical": 0.013},
+    {"surface": "混凝土渠道", "channel_type": "衬砌", "condition": "粗糙", "n_min": 0.014, "n_max": 0.020, "n_typical": 0.017},
+    {"surface": "混凝土管道", "channel_type": "管道", "condition": "新建", "n_min": 0.010, "n_max": 0.013, "n_typical": 0.012},
+    {"surface": "混凝土管道", "channel_type": "管道", "condition": "旧管道", "n_min": 0.013, "n_max": 0.018, "n_typical": 0.015},
+    {"surface": "钢筋混凝土管", "channel_type": "排水管", "condition": "良好", "n_min": 0.012, "n_max": 0.016, "n_typical": 0.014},
+    {"surface": "HDPE管", "channel_type": "排水管", "condition": "标准", "n_min": 0.009, "n_max": 0.012, "n_typical": 0.010},
+    {"surface": "铸铁管", "channel_type": "给水管", "condition": "新", "n_min": 0.011, "n_max": 0.015, "n_typical": 0.013},
+    {"surface": "砖砌渠道", "channel_type": "衬砌", "condition": "良好", "n_min": 0.013, "n_max": 0.017, "n_typical": 0.015},
+    {"surface": "浆砌石", "channel_type": "衬砌", "condition": "良好", "n_min": 0.017, "n_max": 0.025, "n_typical": 0.020},
+    {"surface": "天然河道", "channel_type": "河道", "condition": "顺直清洁", "n_min": 0.025, "n_max": 0.035, "n_typical": 0.030},
+    {"surface": "天然河道", "channel_type": "河道", "condition": "弯曲有杂草", "n_min": 0.035, "n_max": 0.050, "n_typical": 0.040},
+    {"surface": "天然河道", "channel_type": "河道", "condition": "多石多草", "n_min": 0.040, "n_max": 0.060, "n_typical": 0.050},
+    {"surface": "草地", "channel_type": "地表漫流", "condition": "短草", "n_min": 0.025, "n_max": 0.035, "n_typical": 0.030},
+    {"surface": "沥青路面", "channel_type": "地表漫流", "condition": "光滑", "n_min": 0.011, "n_max": 0.016, "n_typical": 0.013},
+    {"surface": "透水砖", "channel_type": "地表漫流", "condition": "LID设施", "n_min": 0.015, "n_max": 0.025, "n_typical": 0.020}
+  ]
+}

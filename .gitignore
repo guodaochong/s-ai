@@ -1,0 +1,40 @@
+# Large data files
+data/LBH_DEM_v2_0.5m_EPSG4544.tif
+data/uploads/
+*.tif
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Node
+node_modules/
+
+# Logs
+*.log
+
+# Cache
+.cache/
+.opencode/

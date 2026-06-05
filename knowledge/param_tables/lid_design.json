@@ -1,0 +1,16 @@
+{
+  "description": "LID低影响开发设施参数 - 海绵城市设计",
+  "source": "GB/T 51345《海绵城市建设评价标准》, 图集15MR105《城市道路—透水人行道》",
+  "entries": [
+    {"lid_type": "透水铺装", "surface_depth_mm": 60, "surface_void_ratio": 0.20, "storage_depth_mm": 300, "storage_void_ratio": 0.35, "infil_rate_mm_hr": 150, "cost_yuan_m2": 120, "application": "人行道、广场、停车场"},
+    {"lid_type": "绿色屋顶", "surface_depth_mm": 100, "surface_void_ratio": 0.30, "soil_depth_mm": 200, "storage_depth_mm": 50, "storage_void_ratio": 0.40, "infil_rate_mm_hr": 50, "cost_yuan_m2": 350, "application": "建筑屋顶"},
+    {"lid_type": "下凹式绿地", "surface_depth_mm": 100, "surface_void_ratio": 0.25, "soil_depth_mm": 300, "infil_rate_mm_hr": 30, "cost_yuan_m2": 80, "application": "道路绿化带、小区绿地"},
+    {"lid_type": "生物滞留设施", "surface_depth_mm": 200, "surface_void_ratio": 0.25, "soil_depth_mm": 500, "storage_depth_mm": 300, "storage_void_ratio": 0.40, "infil_rate_mm_hr": 50, "cost_yuan_m2": 250, "application": "道路、广场、停车场周边"},
+    {"lid_type": "雨水花园", "surface_depth_mm": 150, "surface_void_ratio": 0.25, "soil_depth_mm": 400, "storage_depth_mm": 200, "storage_void_ratio": 0.35, "infil_rate_mm_hr": 40, "cost_yuan_m2": 200, "application": "小区、公园"},
+    {"lid_type": "植草沟", "surface_depth_mm": 200, "surface_void_ratio": 0.25, "slope_pct": 1.0, "manning_n": 0.25, "infil_rate_mm_hr": 30, "cost_yuan_m2": 60, "application": "道路两侧、绿地边缘"},
+    {"lid_type": "雨水湿地", "surface_depth_mm": 500, "surface_void_ratio": 0.30, "soil_depth_mm": 300, "infil_rate_mm_hr": 10, "cost_yuan_m2": 400, "application": "公园、滨河区域"},
+    {"lid_type": "蓄水池", "volume_m3": "按需定制", "material": "PP模块/混凝土", "cost_yuan_m3": 800, "application": "小区、公园、广场"},
+    {"lid_type": "渗透管(渠)", "diameter_mm": 300, "pipe_material": "穿孔HDPE", "gravel_depth_mm": 300, "gravel_void_ratio": 0.35, "cost_yuan_m": 500, "application": "道路、广场地下"},
+    {"lid_type": "雨水桶", "volume_L": 200, "material": "PE塑料", "cost_yuan": 300, "application": "住宅屋顶雨水收集"}
+  ]
+}

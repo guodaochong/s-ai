@@ -1,0 +1,29 @@
+{
+  "description": "城市排水设计标准 - 重现期、径流系数、设计流量计算",
+  "source": "GB 50014《室外排水设计标准》, GB/T 50838《城市综合管廊工程技术规范》",
+  "entries": [
+    {"parameter": "设计重现期P", "area_type": "一般地区", "p_min_years": 2, "p_max_years": 5, "p_typical_years": 3, "standard": "GB 50014-2021 表3.2.2"},
+    {"parameter": "设计重现期P", "area_type": "重要地区", "p_min_years": 3, "p_max_years": 10, "p_typical_years": 5, "standard": "GB 50014-2021 表3.2.2"},
+    {"parameter": "设计重现期P", "area_type": "地下通道/立交", "p_min_years": 10, "p_max_years": 50, "p_typical_years": 20, "standard": "GB 50014-2021 表3.2.2"},
+    {"parameter": "设计重现期P", "area_type": "特别重要地区", "p_min_years": 10, "p_max_years": 100, "p_typical_years": 50, "standard": "GB 50014-2021 表3.2.2"},
+    {"parameter": "径流系数ψ", "area_type": "屋面", "psi_min": 0.85, "psi_max": 0.95, "psi_typical": 0.90, "standard": "GB 50014-2021 表3.2.4"},
+    {"parameter": "径流系数ψ", "area_type": "混凝土/沥青路面", "psi_min": 0.85, "psi_max": 0.95, "psi_typical": 0.90, "standard": "GB 50014-2021 表3.2.4"},
+    {"parameter": "径流系数ψ", "area_type": "块石路面", "psi_min": 0.55, "psi_max": 0.65, "psi_typical": 0.60, "standard": "GB 50014-2021 表3.2.4"},
+    {"parameter": "径流系数ψ", "area_type": "级配碎石路面", "psi_min": 0.40, "psi_max": 0.50, "psi_typical": 0.45, "standard": "GB 50014-2021 表3.2.4"},
+    {"parameter": "径流系数ψ", "area_type": "非铺砌路面", "psi_min": 0.25, "psi_max": 0.40, "psi_typical": 0.30, "standard": "GB 50014-2021 表3.2.4"},
+    {"parameter": "径流系数ψ", "area_type": "绿地", "psi_min": 0.10, "psi_max": 0.20, "psi_typical": 0.15, "standard": "GB 50014-2021 表3.2.4"},
+    {"parameter": "径流系数ψ", "area_type": "综合(城市)", "psi_min": 0.50, "psi_max": 0.80, "psi_typical": 0.65, "standard": "GB 50014-2021 表3.2.4"},
+    {"parameter": "最小管径", "area_type": "污水管", "dn_min_mm": 300, "slope_min": 0.003, "standard": "GB 50014-2021 第4.2节"},
+    {"parameter": "最小管径", "area_type": "雨水管", "dn_min_mm": 300, "slope_min": 0.003, "standard": "GB 50014-2021 第4.2节"},
+    {"parameter": "最小管径", "area_type": "雨水口连接管", "dn_min_mm": 200, "slope_min": 0.01, "standard": "GB 50014-2021 第4.2节"},
+    {"parameter": "最小流速", "area_type": "污水管(满流)", "v_min_ms": 0.60, "standard": "GB 50014-2021 表4.2.7"},
+    {"parameter": "最小流速", "area_type": "雨水管(满流)", "v_min_ms": 0.75, "standard": "GB 50014-2021 表4.2.7"},
+    {"parameter": "最大流速", "area_type": "金属管", "v_max_ms": 10.0, "standard": "GB 50014-2021 表4.2.7"},
+    {"parameter": "最大流速", "area_type": "非金属管", "v_max_ms": 5.0, "standard": "GB 50014-2021 表4.2.7"},
+    {"parameter": "最小覆土深度", "area_type": "车行道下", "depth_min_m": 0.7, "standard": "GB 50014-2021 第4.3节"},
+    {"parameter": "最小覆土深度", "area_type": "人行道下", "depth_min_m": 0.6, "standard": "GB 50014-2021 第4.3节"},
+    {"parameter": "雨水口间距", "area_type": "一般路段", "spacing_min_m": 25, "spacing_max_m": 50, "standard": "GB 50014-2021 第4.7节"},
+    {"parameter": "雨水口间距", "area_type": "低洼/易涝点", "spacing_min_m": 10, "spacing_max_m": 25, "standard": "GB 50014-2021 第4.7节"},
+    {"parameter": "溢流井", "area_type": "截流倍数n0", "n0_min": 1, "n0_max": 5, "n0_typical": 2, "standard": "GB 50014-2021 第4.8节"}
+  ]
+}

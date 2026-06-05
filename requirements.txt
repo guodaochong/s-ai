@@ -1,0 +1,17 @@
+mcp>=1.6.0
+fastapi>=0.115.0
+uvicorn>=0.34.0
+sse-starlette>=2.0.0
+redis>=5.0.0
+httpx>=0.28.0
+zhipuai>=3.0.0
+pydantic>=2.10.0
+pydantic-settings>=2.7.0
+structlog>=24.0.0
+tenacity>=9.0.0
+geopandas>=1.0.0
+shapely>=2.0.0
+pyproj>=3.7.0
+fiona>=1.10.0
+matplotlib>=3.10.0
+numpy>=2.0.0

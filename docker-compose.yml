@@ -1,0 +1,172 @@
+version: "3.8"
+
+services:
+  # ── Data Layer ──────────────────────────────────────────
+  postgis:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sai}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  chroma:
+    image: chromadb/chroma:latest
+    volumes:
+      - chromadata:/chroma/chroma
+    ports:
+      - "${CHROMA_PORT:-8001}:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── MCP Tool Servers ───────────────────────────────────
+  mcp-gis:
+    build:
+      context: .
+      dockerfile: servers/mcp-gis/Dockerfile
+    depends_on:
+      postgis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-changeme}@postgis:5432/${POSTGRES_DB:-sai}
+    ports:
+      - "${MCP_GIS_PORT:-5001}:5000"
+
+  mcp-data:
+    build:
+      context: .
+      dockerfile: servers/mcp-data/Dockerfile
+    depends_on:
+      postgis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-changeme}@postgis:5432/${POSTGRES_DB:-sai}
+    ports:
+      - "${MCP_DATA_PORT:-5002}:5000"
+
+  mcp-knowledge:
+    build:
+      context: .
+      dockerfile: servers/mcp-knowledge/Dockerfile
+    depends_on:
+      chroma:
+        condition: service_healthy
+    environment:
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+    volumes:
+      - ./knowledge:/app/knowledge:ro
+    ports:
+      - "${MCP_KNOWLEDGE_PORT:-5003}:5000"
+
+  mcp-map:
+    build:
+      context: .
+      dockerfile: servers/mcp-map/Dockerfile
+    ports:
+      - "${MCP_MAP_PORT:-5004}:5000"
+
+  # ── Agent Registry ─────────────────────────────────────
+  sai-registry:
+    build:
+      context: .
+      dockerfile: registry/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    ports:
+      - "${REGISTRY_PORT:-9000}:9000"
+
+  # ── Agents ─────────────────────────────────────────────
+  router-agent:
+    build:
+      context: .
+      dockerfile: agents/Dockerfile
+    command: ["python", "-m", "agents.router"]
+    depends_on:
+      sai-registry:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    environment:
+      - ZHIPUAI_API_KEY=${ZHIPUAI_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - REGISTRY_URL=http://sai-registry:9000
+      - MCP_GIS_URL=http://mcp-gis:5000
+      - MCP_DATA_URL=http://mcp-data:5000
+      - MCP_KNOWLEDGE_URL=http://mcp-knowledge:5000
+      - MCP_MAP_URL=http://mcp-map:5000
+    ports:
+      - "${ROUTER_AGENT_PORT:-6000}:6000"
+
+  gis-agent:
+    build:
+      context: .
+      dockerfile: agents/Dockerfile
+    command: ["python", "-m", "agents.gis"]
+    depends_on:
+      sai-registry:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      mcp-gis:
+        condition: service_started
+    environment:
+      - ZHIPUAI_API_KEY=${ZHIPUAI_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - REGISTRY_URL=http://sai-registry:9000
+      - MCP_GIS_URL=http://mcp-gis:5000
+      - MCP_DATA_URL=http://mcp-data:5000
+    ports:
+      - "${GIS_AGENT_PORT:-6001}:6000"
+
+  knowledge-agent:
+    build:
+      context: .
+      dockerfile: agents/Dockerfile
+    command: ["python", "-m", "agents.knowledge"]
+    depends_on:
+      sai-registry:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      mcp-knowledge:
+        condition: service_started
+    environment:
+      - ZHIPUAI_API_KEY=${ZHIPUAI_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - REGISTRY_URL=http://sai-registry:9000
+      - MCP_KNOWLEDGE_URL=http://mcp-knowledge:5000
+    ports:
+      - "${KNOWLEDGE_AGENT_PORT:-6005}:6000"
+
+volumes:
+  pgdata:
+  redisdata:
+  chromadata:
