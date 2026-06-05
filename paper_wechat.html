@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S-AI: 基于LLM编排MCP架构的水动力洪水模拟多智能体空间智能框架</title>
+</head>
+<body style="margin:0;padding:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:16px;line-height:1.8;color:#333;background:#fff;">
+    <div style="max-width:677px;margin:0 auto;padding:20px 15px;">
+
+        <!-- Header Banner -->
+        <header style="text-align:center;padding:40px 20px;background:linear-gradient(135deg,#1a73e8 0%,#0d47a1 100%);color:#fff;border-radius:12px;margin-bottom:30px;box-shadow:0 4px 20px rgba(26,115,232,0.3);">
+            <h1 style="margin:0;font-size:24px;font-weight:700;line-height:1.4;padding-bottom:15px;">S-AI: 基于LLM编排MCP架构的水动力洪水模拟多智能体空间智能框架</h1>
+            <p style="margin:10px 0 0;font-size:14px;opacity:0.9;">S-AI: A Multi-Agent Spatial Intelligence Framework for Hydrodynamic Flood Simulation via LLM-Orchestrated MCP Architecture</p>
+        </header>
+
+        <!-- Author Info -->
+        <div style="text-align:center;margin-bottom:30px;padding:20px;background:#f8f9fa;border-radius:8px;">
+            <p style="margin:0;font-weight:600;font-size:18px;">郭道冲 ✉️</p>
+            <p style="margin:5px 0;color:#666;font-size:14px;">通讯作者. E-mail: guodaochong@luobin-pi.com</p>
+            <p style="margin:10px 0 0;color:#1a73e8;font-size:14px;">LUOBIN-PI 研究实验室<br/>空间智能与水信息学部门<br/>中国 甘肃</p>
+        </div>
+
+        <!-- Chinese Abstract -->
+        <section style="margin-bottom:40px;">
+            <h2 style="margin:0 0 15px;font-size:20px;color:#1a73e8;border-left:4px solid #1a73e8;padding-left:12px;">摘要</h2>
+            <div style="background:#f5f5f5;padding:20px;border-radius:8px;line-height:1.9;">
+                <p style="margin:0;">洪水灾害是21世纪对民用基础设施和人类福利最具后果性和日益严峻的威胁之一,全球每年经济损失超过800亿美元,2000至2020年间影响了超过20亿人。虽然基于物理的水动力模型(特别是求解二维浅水方程的模型)为淹没预测提供了黄金标准,但其实际部署受到过高的计算开销、复杂的参数校准以及陡峭的学习曲线的限制,使其使用局限于少数领域专家。本文介绍了S-AI (Spatial-AI),一个生产级的多智能体空间智能平台,通过大语言模型(LLM)编排自动化重新构想洪水建模。其核心在于,S-AI利用模型上下文协议(MCP)将42+专业地理空间和水文工具整合到8个微服务中,通过GLM-5.1实现自然语言意图解析,自动将用户查询分解为可执行的水动力工作流。该平台实现了一个受LISFLOOD-FP启发的二维扩散波求解器,在超高分辨率数字高程模型(0.5米地面采样距离,3 GB GeoTIFF, 22,063 × 36,308像素)上运行,无缝耦合实时三维地理空间可视化引擎,由自定义GLSL水着色器驱动,具有菲涅尔反射、Blinn-Phong高光、深度衰减颜色梯度、程序化波浪位移和泡沫生成功能。方法上,我们采用Delaunay三角剖分进行自适应地形网格生成(从3,000个采样顶点生成5,969个三角形),使用Manning摩擦公式计算单元格边缘通量,并受CFL稳定性约束,使用Keifer–Chu芝加哥暴雨时间分布进行逼真的降雨强迫。经验评估涵盖甘肃省迭部县17.2 km²山区流域,演示了端到端操作从自然语言查询(“模拟迭部县城50年一遇设计暴雨洪水”)到交互式3D洪水动画(166帧,900秒物理时间,10,000+ CFL受限时间步,25秒计算时间)。该系统代表了LLM编排工具联邦和水动力建模民主化的重要一步,使复杂仿真能力无需传统HPC基础设施即可获得。</p>
+            </div>
+        </section>
+
+        <!-- English Abstract -->
+        <section style="margin-bottom:40px;">
+            <h2 style="margin:0 0 15px;font-size:20px;color:#1a73e8;border-left:4px solid #1a73e8;padding-left:12px;">Abstract</h2>
+            <p style="margin:0;line-height:1.9;">Flood disasters constitute one of the most consequential and escalating threats to civil infrastructure and human welfare in the twenty-first century, with global economic losses surpassing $80 billion per annum and affecting over two billion people between 2000 and 2020. While physics-based hydrodynamic models — particularly those solving the two-dimensional shallow water equations — provide the gold standard for inundation prediction, their operational deployment remains encumbered by prohibitive computational overhead, labyrinthine parameter calibration, and a steep learning curve that confines their use to a narrow cadre of domain specialists. This paper introduces S-AI (Spatial-AI), a production-grade, multi-agent spatial intelligence platform that reconceptualizes flood modeling through the lens of Large Language Model (LLM)-orchestrated automation. At its core, S-AI leverages the Model Context Protocol (MCP) to federate 42+ specialized geospatial and hydrological tools across eight microservices, enabling natural language intent parsing via GLM-5.1 that autonomously decomposes user queries into executable hydrodynamic workflows. The platform implements a LISFLOOD-FP-inspired two-dimensional diffusion wave solver operating on ultra-high-resolution Digital Elevation Models (0.5 m ground sampling distance, 3 GB GeoTIFF, 22,063 × 36,308 pixels), seamlessly coupled with a real-time three-dimensional geospatial visualization engine powered by custom GLSL water shaders featuring Fresnel reflectance, Blinn-Phong specular highlights, depth-attenuated color gradients, procedural wave displacement, and foam generation. Methodologically, we employ Delaunay triangulation for adaptive terrain mesh generation (5,969 triangles from 3,000 sampled vertices), Manning's friction formula for cell-edge flux computation subject to CFL stability constraints, and Keifer–Chu Chicago storm temporal distributions for realistic rainfall forcing. Empirical evaluation across a 17.2 km² mountainous catchment in Diebu County, Gansu Province demonstrates end-to-end operation from natural language query (Simulate a 50-year design storm flood for Diebu County) to interactive 3D flood animation (166 frames, 900 s physical time, 10,000+ CFL-limited timesteps, 25 s compute time). The system represents a significant step toward LLM-orchestrated tool federation and hydrodynamic modeling democratization, making complex simulation capabilities accessible without traditional HPC infrastructure.</p>
+        </section>
+
+        <!-- Keywords -->
+        <section style="margin-bottom:40px;">
+            <h2 style="margin:0 0 15px;font-size:20px;color:#1a73e8;border-left:4px solid #1a73e8;padding-left:12px;">关键词 / Keywords</h2>
+            <p style="margin:0;color:#666;font-style:italic;">空间智能; 多智能体系统; 水动力建模; 模型上下文协议; 大语言模型; 洪水模拟; Delaunay三角剖分; 实时3D可视化</p>
+            <p style="margin:10px 0 0;color:#666;font-style:italic;">spatial intelligence; multi-agent systems; hydrodynamic modeling; Model Context Protocol; large language models; flood simulation; Delaunay triangulation; real-time 3D visualization</p>
+        </section>
+
+        <!-- Nomenclature Table -->
+        <section style="margin-bottom:40px;">
+            <h2 style="margin:0 0 15px;font-size:20px;color:#1a73e8;border-left:4px solid #1a73e8;padding-left:12px;">术语表</h2>
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:14px;">
+                    <tr style="background:#e8f0fe;">
+                        <th style="padding:12px;text-align:left;border-bottom:2px solid #1a73e8;color:#1a73e8;font-weight:600;">符号</th>
+                        <th style="padding:12px;text-align:left;border-bottom:2px solid #1a73e8;color:#1a73e8;font-weight:600;">描述</th>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">h</td>
+                        <td style="padding:12px;">水深 [m]</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">u, v</td>
+                        <td style="padding:12px;">x和y方向的深度平均速度分量 [m/s]</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">R</td>
+                        <td style="padding:12px;">降雨强度 [m/s]</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">g</td>
+                        <td style="padding:12px;">重力加速度 (9.81 m/s²)</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">n</td>
+                        <td style="padding:12px;">Manning粗糙系数 [s/m^(1/3)]</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">S<sub>f</sub></td>
+                        <td style="padding:12px;">摩擦坡度 [-]</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">z</td>
+                        <td style="padding:12px;">河床高程 [m]</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">q<sub>x</sub>, q<sub>y</sub></td>
+                        <td style="padding:12px;">x和y方向的单位宽度流量 [m²/s]</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">Δt</td>
+                        <td style="padding:12px;">计算时间步长 [s]</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">Δx, Δy</td>
+                        <td style="padding:12px;">x和y方向的网格间距 [m]</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">T<sub>R</sub></td>
+                        <td style="padding:12px;">重现期 [年]</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">T<sub>d</sub></td>
+                        <td style="padding:12px;">暴雨持续时间 [分钟]</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">i<sub>peak</sub></td>
+                        <td style="padding:12px;">峰值降雨强度 [mm/h]</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">V, F</td>
+                        <td style="padding:12px;">TIN网格的顶点集和三角形(面)集</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">F(θ)</td>
+                        <td style="padding:12px;">菲涅尔反射系数 (Schlick近似)</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">k<sub>s</sub>, α</td>
+                        <td style="padding:12px;">镜面反射率和光泽度指数 (Blinn-Phong)</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">η</td>
+                        <td style="padding:12px;">程序动画的垂直波浪位移 [场景单位]</td>
+                    </tr>
+                    <tr style="border-bottom:1px solid #e0e0e0;">
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">d<sub>s</sub></td>
+                        <td style="padding:12px;">3D可视化的深度夸张系数 [-]</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:12px;font-family:'Courier New',monospace;background:#fafafa;">Ω<sub>valid</sub></td>
+                        <td style="padding:12px;">表示有效DEM像素的空间域掩码</td>
+                    </tr>
+                </table>
+            </div>
+        </section>
+
+        <!-- Section 1: Introduction -->
+        <section style="margin-bottom:40px;">
+            <h2 style="margin:0 0 20px;font-size:20px;color:#1a73e8;border-left:4px solid #1a73e8;padding-left:12px;">1. 引言</h2>
+            <p style="margin:0 0 15px;line-height:1.9;">洪水灾害是一个关键的且日益严峻的全球挑战,2000年至2020年间影响了约23亿人,造成经济损失超过8000亿美元[1]。极端降水事件的频率和强度不断加剧——受人为气候变化的影响——加剧了这种脆弱性,洪水相关死亡率集中在缺乏早期预警基础设施的发展中国家。求解浅水方程(SWE)的基于物理的水动力仿真模型仍然是预测淹没范围、流深和速度场的黄金标准,对于工程设计、应急响应规划和基础设施韧性评估不可或缺[2]。</p>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">1.1 水动力建模的可访问性悖论</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">水动力模型的实际部署面临四个相互关联的阻碍。首先,SWE的数学表述需要计算流体动力学、数值方法和双曲守恒律方面的专业知识——这是一项在专门工程部门之外很少发现的技能组合。其次,参数校准需要对Manning粗糙系数、入渗参数和边界条件进行迭代细化,这一过程假定具有广泛的领域知识并能获取历史验证事件。第三,在高分辨率地形上进行二维仿真的计算负担,特别是对于超过10 km²且分辨率低于1米的域,通常需要高性能计算(HPC)资源,而这些资源对于许多机构和区域应急管理机构来说是无法获得的。</p>
+        </section>
+
+        <!-- Section 2: Background and Related Work -->
+        <section style="margin-bottom:40px;">
+            <h2 style="margin:0 0 20px;font-size:20px;color:#1a73e8;border-left:4px solid #1a73e8;padding-left:12px;">2. 背景与相关工作</h2>
+            <p style="margin:0 0 15px;line-height:1.9;">本节综述传统水动力建模方法及其局限性,介绍大型语言模型(LLM)编排的多智能体系统,以及模型上下文协议(MCP),它们构成了S-AI架构的基础。</p>
+        </section>
+
+        <!-- Section 3: System Architecture -->
+        <section style="margin-bottom:40px;">
+            <h2 style="margin:0 0 20px;font-size:20px;color:#1a73e8;border-left:4px solid #1a73e8;padding-left:12px;">3. 系统架构</h2>
+            <p style="margin:0 0 15px;line-height:1.9;">S-AI遵循五阶段管道架构(图1),从自然语言查询到交互式3D洪水可视化。每个阶段由专用的MCP服务器处理,经由中央LLM编排器协调。</p>
+
+            <div style="background:#f8f9fa;padding:20px;border-left:3px solid #1a73e8;margin:20px 0;">
+                <p style="margin:0;font-style:italic;"><strong>图1. S-AI系统架构:五阶段管道,通过MCP服务器网络编排,由GLM-5.1 LLM驱动。I:自然语言查询解析。II:DEM处理与参数配置。III:水动力仿真(扩散波求解器)。IV:结果后处理(深度到TIN映射)。V:3D可视化(Three.js + GLSL着色器)。</strong></p>
+            </div>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">阶段 I — 意图解析与查询分解</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">用户通过自然语言提供查询(例如,Simulate a 50-year design storm flood for Diebu County with 120-minute storm duration and n=0.035 Manning's roughness)。GLM-5.1 LLM通过MCP与semantic_analysis服务器交互,执行三个子任务:地点消歧、参数提取和模式选择。</p>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">阶段 II — DEM处理与参数配置</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">dem_processing服务器加载GeoTIFF文件,执行nodata掩码(Ω<sub>valid</sub>识别),计算统计信息(e<sub>min</sub>, e<sub>max</sub>, mean, std),并生成256 × 256降采样高度图用于可视化。参数配置服务器应用默认值(Manning's n = 0.035, CFL安全因子 = 0.8)并回填用户指定的覆盖项。</p>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">阶段 III — 水动力仿真</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">hydro_solver服务器执行有限体积扩散波求解器。对于每个时间步k,它计算单元间通量,更新水深h,并遵守CFL稳定性约束Δt ≤ 0.09 s。对于15分钟(900 s)的仿真,这产生约10,000个时间步。深度数组每60个时间步写入磁盘以进行时间序列可视化。</p>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">阶段 IV — 后处理与TIN生成</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">post_processing服务器接收高分辨率深度场,为地形网格生成执行Delaunay三角剖分(算法1),并创建每帧GeoJSON文件(tin_frame_XXX.geojson),包含三角形索引和顶点深度。</p>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">阶段 V — 3D可视化</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">前端接收高度图(256 × 256降采样地形)、TIN拓扑(顶点、单纯形)和每帧深度数组。3D引擎构建地形网格,应用水着色器,并填充时间轴以进行交互式播放。</p>
+        </section>
+
+        <!-- Section 4: Methodology -->
+        <section style="margin-bottom:40px;">
+            <h2 style="margin:0 0 20px;font-size:20px;color:#1a73e8;border-left:4px solid #1a73e8;padding-left:12px;">4. 方法论:二维水动力模型</h2>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">4.1 控制方程</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">S-AI水动力模型实现了扩散波形式的二维浅水方程。质量守恒方程为:</p>
+
+            <p style="text-align:center;margin:20px 0;background:#f5f5f5;padding:15px;border-radius:8px;">
+                <img src="https://latex.codecogs.com/svg.image?\frac{\partial&space;h}{\partial&space;t}&space;&plus;&space;\frac{\partial&space;q_x}{\partial&space;x}&space;&plus;&space;\frac{\partial&space;q_y}{\partial&space;y}&space;=&space;R" style="vertical-align:middle;max-width:100%;height:auto;"/>
+            </p>
+            <p style="text-align:center;margin:-10px 0 20px;font-size:12px;color:#666;">(1)</p>
+
+            <p style="margin:0 0 15px;line-height:1.9;">其中h [m]是水深,q<sub>x</sub> = hu和q<sub>y</sub> = hv是单位宽度流量,R [m/s]是降雨源项。守恒形式的完整动量方程为:</p>
+
+            <p style="text-align:center;margin:20px 0;background:#f5f5f5;padding:15px;border-radius:8px;">
+                <img src="https://latex.codecogs.com/svg.image?\frac{\partial&space;q_x}{\partial&space;t}&space;&plus;&space;\frac{\partial}{\partial&space;x}\!\left(\frac{q_x^2}{h}&space;&plus;&space;\frac{gh^2}{2}\right)&space;&plus;&space;\frac{\partial}{\partial&space;y}\!\left(\frac{q_x&space;q_y}{h}\right)&space;=&space;-gh\frac{\partial&space;z}{\partial&space;x}&space;-&space;ghS_{fx}" style="vertical-align:middle;max-width:100%;height:auto;"/>
+            </p>
+            <p style="text-align:center;margin:-10px 0 20px;font-size:12px;color:#666;">(2)</p>
+
+            <p style="text-align:center;margin:20px 0;background:#f5f5f5;padding:15px;border-radius:8px;">
+                <img src="https://latex.codecogs.com/svg.image?\frac{\partial&space;q_y}{\partial&space;t}&space;&plus;&space;\frac{\partial}{\partial&space;x}\!\left(\frac{q_x&space;q_y}{h}\right)&space;&plus;&space;\frac{\partial}{\partial&space;y}\!\left(\frac{q_y^2}{h}&space;&plus;&space;\frac{gh^2}{2}\right)&space;=&space;-gh\frac{\partial&space;z}{\partial&space;y}&space;-&space;ghS_{fy}" style="vertical-align:middle;max-width:100%;height:auto;"/>
+            </p>
+            <p style="text-align:center;margin:-10px 0 20px;font-size:12px;color:#666;">(3)</p>
+
+            <p style="margin:0 0 15px;line-height:1.9;">扩散波近似忽略了所有对流加速度项(方程2-3的左侧),产生重力和摩擦之间的局部力平衡:</p>
+
+            <p style="text-align:center;margin:20px 0;background:#f5f5f5;padding:15px;border-radius:8px;">
+                <img src="https://latex.codecogs.com/svg.image?S_{fx}&space;=&space;-\frac{\partial(z&plus;h)}{\partial&space;x},\qquad&space;S_{fy}&space;=&space;-\frac{\partial(z&plus;h)}{\partial&space;y}" style="vertical-align:middle;max-width:100%;height:auto;"/>
+            </p>
+            <p style="text-align:center;margin:-10px 0 20px;font-size:12px;color:#666;">(4)</p>
+
+            <p style="margin:0 0 15px;line-height:1.9;">其中S<sub>fx</sub>和S<sub>fy</sub>分别是x和y方向的摩擦坡度。当弗劳德数Fr = |<b>v</b>|/√(gh) ≪ 1时,该近似有效,对于绝大多数渐变洪泛平原流动都满足这一条件。</p>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">4.2 Manning摩擦与通量计算</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">单位宽度流量通过Manning方程[10]计算:</p>
+
+            <p style="text-align:center;margin:20px 0;background:#f5f5f5;padding:15px;border-radius:8px;">
+                <img src="https://latex.codecogs.com/svg.image?q_x&space;=&space;\frac{h^{5/3}}{n}\left|S_{fx}\right|^{1/2}\,\mathrm{sgn}(S_{fx}),\qquad&space;q_y&space;=&space;\frac{h^{5/3}}{n}\left|S_{fy}\right|^{1/2}\,\mathrm{sgn}(S_{fy})" style="vertical-align:middle;max-width:100%;height:auto;"/>
+            </p>
+            <p style="text-align:center;margin:-10px 0 20px;font-size:12px;color:#666;">(5)</p>
+
+            <p style="margin:0 0 15px;line-height:1.9;">其中n [s/m^(1/3)]是Manning粗糙系数,通常范围从0.015(混凝土渠道)到0.060(茂密植被)。指数5/3源于宽浅流动的水力半径近似R<sub>h</sub> ≈ h。每个单元格边缘的通量从相邻单元格之间的水位高程差计算,最小深度阈值防止来自近干单元格的通量。</p>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">4.3 有限体积离散化</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">空间域离散化为与DEM光栅对齐的均匀笛卡尔网格。时间水平k处单元格(i,j)的有限体积更新为:</p>
+
+            <p style="text-align:center;margin:20px 0;background:#f5f5f5;padding:15px;border-radius:8px;">
+                <img src="https://latex.codecogs.com/svg.image?h_{i,j}^{k&plus;1}&space;=&space;h_{i,j}^k&space;&plus;&space;\frac{\Delta&space;t}{\Delta&space;x}\left(q_{x,i-1/2,j}&space;-&space;q_{x,i&plus;1/2,j}\right)&space;&plus;&space;\frac{\Delta&space;t}{\Delta&space;y}\left(q_{y,i,j-1/2}&space;-&space;q_{y,i,j&plus;1/2}\right)&space;&plus;&space;R\Delta&space;t" style="vertical-align:middle;max-width:100%;height:auto;"/>
+            </p>
+            <p style="text-align:center;margin:-10px 0 20px;font-size:12px;color:#666;">(6)</p>
+
+            <p style="margin:0 0 15px;line-height:1.9;">其中q<sub>x,i±1/2,j</sub>和q<sub>y,i,j±1/2</sub>是通过Manning公式(5)在单元格边缘计算的通量。</p>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">4.4 CFL稳定性条件</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">显式时间积分需要Courant-Friedrichs-Lewy(CFL)条件以保证数值稳定性:</p>
+
+            <p style="text-align:center;margin:20px 0;background:#f5f5f5;padding:15px;border-radius:8px;">
+                <img src="https://latex.codecogs.com/svg.image?\Delta&space;t&space;\leq&space;\alpha\,\min\left(\frac{\Delta&space;x}{\sqrt{gh}},\frac{\Delta&space;y}{\sqrt{gh}}\right)" style="vertical-align:middle;max-width:100%;height:auto;"/>
+            </p>
+            <p style="text-align:center;margin:-10px 0 20px;font-size:12px;color:#666;">(7)</p>
+
+            <p style="margin:0 0 15px;line-height:1.9;">其中α = 0.8是安全因子,对于浅水(gh ≈ 10 m²/s²)和Δx = Δy = 0.5 m,产生Δt ≤ 0.09 s。求解器在每个时间步后动态调整Δt以维持CFL约束。</p>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">4.5 降雨模式</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">平台实现了三种降雨模式用于逼真的洪水情景:</p>
+            <ul style="margin:0 0 15px;padding-left:25px;line-height:1.9;">
+                <li><strong>均匀恒定:</strong> R(t) = R<sub>0</sub>用于测试和验证。</li>
+                <li><strong>芝加哥暴雨模式:</strong> 峰值居中降雨过程,由Keifer和Chu[9]提出,用于设计暴雨模拟。时间分布i(t)由暴雨持续时间T<sub>d</sub>和峰值强度i<sub>peak</sub>参数化。</li>
+                <li><strong>SCS Type II曲线:</strong> 由美国土壤保持服务[23]开发的标准化24小时降雨时间序列,适用于缺乏本地降雨数据的流域。</li>
+            </ul>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">4.6 自适应TIN网格生成</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">为了在保持视觉保真度的同时最小化渲染负载,我们采用Delaunay三角剖分从高分辨率DEM生成自适应不规则三角网(TIN)网格。</p>
+
+            <div style="background:#2d2d2d;padding:15px;border-radius:8px;margin:20px 0;overflow-x:auto;">
+                <pre style="margin:0;font-family:'Courier New',monospace;font-size:13px;color:#f8f8f2;white-space:pre-wrap;line-height:1.5;"><strong>算法1: 自适应TIN网格生成</strong>
+<strong>输入:</strong> DEM raster Ω<sub>valid</sub>, 目标顶点数 V<sub>target</sub>, 最小三角形面积 A<sub>min</sub>
+<strong>输出:</strong> 三角形集 F, 顶点集 V
+
+1: Sample V<sub>init</sub> = 2·V<sub>target</sub> vertices uniformly from Ω<sub>valid</sub>
+2: Compute Delaunay triangulation DT(V<sub>init</sub>) → F<sub>all</sub>
+3: Filter triangles: F = {Δ ∈ F<sub>all</sub> | area(Δ) ≥ A<sub>min</sub> and centroid(Δ) ∈ Ω<sub>valid</sub>}
+4: Extract unique vertices V from filtered triangles F
+5: return V, F</pre>
+            </div>
+
+            <p style="margin:0 0 15px;line-height:1.9;">算法1首先对V<sub>target</sub>两倍数量的顶点进行均匀采样以确保充分的覆盖,然后计算Delaunay三角剖分(时间复杂度O(V log V)[12,13])。面积过滤步骤移除过多细化的三角形,确保地形特征得到保留而不致三角密度过高。通过仅保留质心落在Ω<sub>valid</sub>内的三角形,网格自动排除nodata区域。</p>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">4.7 Nodata处理策略</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">一个关键的实施细节涉及DEM包含无效高程数据的单元格。朴素策略——如填充域均值或固定哨兵值——会引入伪影:水在合成洼地聚集或流经不可逾越的屏障。S-AI采用双管齐下的方法:</p>
+            <ol style="margin:0 0 15px;padding-left:25px;line-height:1.9;">
+                <li><strong>求解器级别:</strong> Nodata单元格接收人为高程z<sub>nodata</sub> = e<sup>valid</sup><sub>max</sub> + 2000 m,初始深度H = 0。这确保水自然避开这些区域,而无需在通量计算中进行特殊情况分支。</li>
+                <li><strong>网格级别:</strong> TIN顶点仅从Ω<sub>valid</sub>采样,质心位于nodata区域的三角形被过滤掉(算法2,第5行),确保3D网格忠实地仅表示有效地形表面。</li>
+            </ol>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">4.8 计算复杂度</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">完整S-AI管道的计算复杂度由三个组件主导:</p>
+            <ul style="margin:0 0 15px;padding-left:25px;line-height:1.9;">
+                <li><strong>FV求解器:</strong> O(N · T),其中N是活动网格单元格的数量,T是时间步的数量。对于迭部案例,N ≈ 10⁶且T ≈ 10⁴,每次仿真产生~10¹⁰次浮点运算。</li>
+                <li><strong>TIN生成:</strong> O(V log V)用于V = 3,000的Delaunay三角剖分,加上O(|F|)用于过滤,总计~3.5 × 10⁴次运算——相对于求解器可以忽略不计。</li>
+                <li><strong>渲染:</strong> 每帧O(|F|)用于5,969个三角形的GPU光栅化,由WebGL管道以~60 fps执行。</li>
+                <li><strong>内存:</strong> O(N + V · K),其中K是存储帧的数量。对于K = 166,内存由求解器数组主导,约2 GB。</li>
+            </ul>
+        </section>
+
+        <!-- Section 5: 3D Visualization -->
+        <section style="margin-bottom:40px;">
+            <h2 style="margin:0 0 20px;font-size:20px;color:#1a73e8;border-left:4px solid #1a73e8;padding-left:12px;">5. 三维地理空间可视化</h2>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">5.1 渲染管道</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">S-AI可视化引擎构建在Three.js (WebGL 2.0)之上,实现多阶段渲染管道,包括七个阶段:地形网格构建、基于高度的顶点着色、水网格构建、GLSL着色器执行、PCF软阴影映射、ACES胶片色调映射和显示合成。</p>
+
+            <div style="background:#f8f9fa;padding:15px;border-left:3px solid #1a73e8;margin:20px 0;">
+                <p style="margin:0;font-style:italic;"><strong>图2. S-AI 3D渲染管道: 并行的地形和水网格构建,统一的场景组合,阴影映射和ACES色调映射。</strong></p>
+            </div>
+
+            <div style="background:#2d2d2d;padding:15px;border-radius:8px;margin:20px 0;overflow-x:auto;">
+                <pre style="margin:0;font-family:'Courier New',monospace;font-size:12px;color:#f8f8f2;white-space:pre-wrap;">DEM (0.5m GeoTIFF) → Heightmap (256×256) → PlaneGeometry → Hypsometric Vertex Color ──┐
+                                                                                          ├→ Scene → Shadow Map → ACES Tone → Canvas
+TIN Vertices + Simplices → BufferGeometry → Per-Vertex Depth → GLSL Water Shader ──────┘</pre>
+            </div>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">5.2 地形渲染与分层着色</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">地形渲染为PlaneGeometry网格(255 × 255顶点),顶点z坐标根据256 × 256高度图置换。分层着色根据高度将顶点颜色映射到大地色谱:低洼深谷为绿色/棕色,中等高程为过渡色,高峰为白色/灰色。</p>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">5.3 GLSL水着色器</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">水表面实现为从TIN拓扑构建的BufferGeometry,顶点深度通过每帧GeoJSON文件中的aDepth属性传入。片段着色器实现了五个物理激励的视觉效果:</p>
+
+            <p style="text-align:center;margin:20px 0;background:#f5f5f5;padding:15px;border-radius:8px;">
+                <img src="https://latex.codecogs.com/svg.image?F(\theta)&space;=&space;F_0&space;&plus;&space;(1&space;-&space;F_0)(1&space;-&space;\cos\theta)^5" style="vertical-align:middle;max-width:100%;height:auto;"/>
+            </p>
+            <p style="text-align:center;margin:-10px 0 20px;font-size:12px;color:#666;">(10)</p>
+
+            <p style="margin:0 0 15px;line-height:1.9;">其中θ是视线与表面法线之间的夹角,F<sub>0</sub> = 0.02是Fresnel系数。这是Schlick近似[14],比计算菲涅尔反射的精确公式更廉价。</p>
+
+            <p style="text-align:center;margin:20px 0;background:#f5f5f5;padding:15px;border-radius:8px;">
+                <img src="https://latex.codecogs.com/svg.image?I_{\text{spec}}&space;=&space;k_s(\mathbf{N}&space;\cdot&space;\mathbf{H})^\alpha" style="vertical-align:middle;max-width:100%;height:auto;"/>
+            </p>
+            <p style="text-align:center;margin:-10px 0 20px;font-size:12px;color:#666;">(11)</p>
+
+            <p style="margin:0 0 15px;line-height:1.9;">其中N是表面法线,H是半向量(视线与光线的平分向量),k<sub>s</sub> = 0.9是镜面反射率,α = 64是光泽度指数。这是Blinn-Phong模型[15]。</p>
+
+            <p style="text-align:center;margin:20px 0;background:#f5f5f5;padding:15px;border-radius:8px;">
+                <img src="https://latex.codecogs.com/svg.image?C_{\text{depth}}&space;=&space;C_{\text{shallow}}&space;&plus;&space;(C_{\text{deep}}&space;-&space;C_{\text{shallow}})\cdot&space;\min(d/3.0,&space;1.0)" style="vertical-align:middle;max-width:100%;height:auto;"/>
+            </p>
+            <p style="text-align:center;margin:-10px 0 20px;font-size:12px;color:#666;">(12)</p>
+
+            <p style="margin:0 0 15px;line-height:1.9;">其中C<sub>shallow</sub> = (0.0, 0.67, 1.0)和C<sub>deep</sub> = (0.0, 0.2, 0.4)是RGB颜色,d是水深。</p>
+
+            <p style="text-align:center;margin:20px 0;background:#f5f5f5;padding:15px;border-radius:8px;">
+                <img src="https://latex.codecogs.com/svg.image?\eta(x,z,t)&space;=&space;A_1\sin(k_1x&space;&plus;&space;\omega_1t)&space;&plus;&space;A_2\cos(k_2z&space;&plus;&space;\omega_2t)" style="vertical-align:middle;max-width:100%;height:auto;"/>
+            </p>
+            <p style="text-align:center;margin:-10px 0 20px;font-size:12px;color:#666;">(13)</p>
+
+            <p style="margin:0 0 15px;line-height:1.9;">其中A<sub>1</sub> = 0.8, A<sub>2</sub> = 0.6是振幅,k<sub>1</sub> = 0.02, k<sub>2</sub> = 0.025是波数,ω<sub>1</sub> = 1.5, ω<sub>2</sub> = 1.2是角频率。</p>
+
+            <p style="text-align:center;margin:20px 0;background:#f5f5f5;padding:15px;border-radius:8px;">
+                <img src="https://latex.codecogs.com/svg.image?C_{\text{foam}}&space;=&space;\text{smoothstep}(0.6,&space;1.0,&space;\eta_{\text{peak}})\cdot\text{smoothstep}(0.01,&space;0.15,&space;d)\cdot&space;C_{\text{white}}" style="vertical-align:middle;max-width:100%;height:auto;"/>
+            </p>
+            <p style="text-align:center;margin:-10px 0 20px;font-size:12px;color:#666;">(14)</p>
+
+            <p style="margin:0 0 15px;line-height:1.9;">泡沫在高波浪峰值(η<sub>peak</sub>)和浅水深度(d < 0.15 m)处生成。</p>
+
+            <p style="text-align:center;margin:20px 0;background:#f5f5f5;padding:15px;border-radius:8px;">
+                <img src="https://latex.codecogs.com/svg.image?C_{\text{final}}&space;=&space;C_{\text{depth}}&space;&plus;&space;F(\theta)\cdot&space;C_{\text{fresnel}}&space;&plus;&space;I_{\text{spec}}&space;&plus;&space;C_{\text{foam}}&space;\cdot&space;0.3" style="vertical-align:middle;max-width:100%;height:auto;"/>
+            </p>
+            <p style="text-align:center;margin:-10px 0 20px;font-size:12px;color:#666;">(15)</p>
+
+            <p style="margin:0 0 15px;line-height:1.9;">最终颜色通过线性组合深度颜色、Fresnel反射、镜面高光和泡沫项计算得出。</p>
+        </section>
+
+        <!-- Section 6: Case Study -->
+        <section style="margin-bottom:40px;">
+            <h2 style="margin:0 0 20px;font-size:20px;color:#1a73e8;border-left:4px solid #1a73e8;padding-left:12px;">6. 案例研究:甘肃省迭部县</h2>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">6.1 研究区域</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">研究区域位于甘肃省迭部县(白龙江上游),跨越17.2 km²的山区集水区,DEM海拔792-1,078 m。地形具有复杂的地貌特征,陡峭的山谷壁(海拔梯度高达30%),蜿蜒的河槽,具有多个支流汇合处,以及缓坡(<5%)的洪泛平原。这种多样性地形为水动力建模提供了一个苛刻的试验台。</p>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">6.2 TIN网格生成结果</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">TIN生成算法(算法1)生成了一个网格,包含|V| = 3,000个顶点和|F| = 5,969个三角形,经过基于面积的过滤和nodata排除(表3)。网格的高程范围(792–1,078 m)准确反映了有效数据走廊。对输出GeoJSON(data/tin_triangles.geojson)的视觉检查证实,没有三角形质心落在nodata区域内,验证了排除算法。网格保留了关键的地形特征,包括河槽底线、山谷壁和洪泛平原过渡。</p>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">6.3 仿真配置</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">洪水仿真配置为代表设计洪水情景的参数:</p>
+            <ul style="margin:0 0 15px;padding-left:25px;line-height:1.9;">
+                <li><strong>降雨:</strong> 芝加哥暴雨模式,50年重现期,120分钟持续时间</li>
+                <li><strong>Manning粗糙度:</strong> n = 0.035 s/m^(1/3)(混合土地利用)</li>
+                <li><strong>网格分辨率:</strong> Δx = Δy = 0.5 m(匹配DEM)</li>
+                <li><strong>CFL安全因子:</strong> 0.8</li>
+                <li><strong>仿真持续时间:</strong> 15分钟(900 s物理时间)</li>
+                <li><strong>Nodata处理:</strong> z<sub>nodata</sub> = e<sup>valid</sup><sub>max</sub> + 2000 m(参见第4.6节)</li>
+                <li><strong>河槽自动定位:</strong> 粗扫描(patch=300)识别最低高程的有效单元格;仿真域裁剪至有效数据边界</li>
+            </ul>
+            <p style="margin:0 0 15px;line-height:1.9;">求解器执行约10,000个CFL受限时间步,自适应Δt ∈ [0.04, 0.09] s。每60个时间步输出每帧深度数组和GeoJSON文件,产生约166个时间快照持久化到data/tin_frame_XXX.geojson。</p>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">6.4 逐帧淹没动态</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">仿真结果揭示了洪水传播的三个不同阶段:</p>
+            <ul style="margin:0 0 15px;padding-left:25px;line-height:1.9;">
+                <li><strong>阶段1 (0–3分钟):</strong> 降雨开始触发地表水积累。淹没始于河槽,地形收敛集中水流。河槽中最大深度达到~0.2 m,而洪泛平原基本保持干燥。径流生成遵循地形坡度的空间分布,较陡的山坡产生对河槽流动的贡献更快。</li>
+                <li><strong>阶段2 (3–8分钟):</strong> 随着上游贡献积累,河槽深度快速增加。在多个位置超过漫滩条件,触发溢流到相邻洪泛平原。淹没横向扩展,优先流路径沿着低洼洼地和支流山谷出现。主河槽中最大深度达到~1.1 m。</li>
+                <li><strong>阶段3 (8–15分钟):</strong> 洪峰到达。主河槽深度稳定在~1.3 m,洪泛平原最大淹没范围扩展。支流山谷形成连通的淹没走廊,低洼洼地经历局部积水。最大洪泛平原深度~0.5 m。</li>
+            </ul>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">6.5 3D可视化性能</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">WebGL渲染管道在标准消费级GPU上以~60 fps执行。TIN网格(5,969三角形)在控制3D可视化的同时保持帧率方面是有效的。WebGL缓冲区更新(每帧~12 KB)和JSON解析开销是可忽略的。交互式时间轴播放支持暂停、拖拽和时间跳跃,使用户能够探索特定事件(如河槽漫滩或洪泛平原连通)。</p>
+        </section>
+
+        <!-- Section 7: Discussion -->
+        <section style="margin-bottom:40px;">
+            <h2 style="margin:0 0 20px;font-size:20px;color:#1a73e8;border-left:4px solid #1a73e8;padding-left:12px;">7. 讨论</h2>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">7.1 技术贡献总结</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">本文介绍了S-AI,一个基于LLM编排的多智能体空间智能平台,用于水动力洪水模拟。主要技术贡献包括:</p>
+            <ol style="margin:0 0 15px;padding-left:25px;line-height:1.9;">
+                <li>一个MCP原生微服务架构,将42+专业工具整合到8个服务器中,具有GLM-5.1自然语言意图解析和自动化工作流编排。</li>
+                <li>一个完整的二维扩散波求解器,具有显式有限体积离散化、Manning摩擦、CFL稳定性和多模式降雨强迫。</li>
+                <li>一个实时3D可视化引擎,具有物理激励的GLSL水着色器(Fresnel、Blinn-Phong、深度梯度、波浪位移、泡沫)和交互式时间轴播放。</li>
+                <li>在甘肃省迭部县17.2 km²山区集水区上的经验验证,演示了从自然语言查询到交互式3D洪水动画的端到端操作。</li>
+            </ol>
+            <p style="margin:0 0 15px;line-height:1.9;">S-AI建立的架构原则——MCP原生工具联邦、LLM驱动的意图路由、基于TIN的3D水动力可视化——并非洪水模拟特有,可泛化到任何需要数值仿真、地理空间分析和交互式可视化集成的领域。</p>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">7.2 未来研究方向</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">几个有前景的方向值得未来调查:</p>
+            <ul style="margin:0 0 15px;padding-left:25px;line-height:1.9;">
+                <li><strong>完整浅水实现:</strong> 将求解器扩展到具有GPU加速的完整SWE将捕获溃坝和山洪情景的对流加速效应,同时通过并行通量计算维持实时交互性。</li>
+                <li><strong>多物理耦合:</strong> 与地下水(MODFLOW)、水质(WASP)和生态系统模型的集成将能够进行超越洪水模拟的综合水资源管理。</li>
+                <li><strong>不确定性量化:</strong> 参数分布(Manning's n、降雨强度、DEM误差)的基于集成的蒙特卡洛采样将生成具有置信区间的概率洪水图,实现风险知情决策制定。</li>
+                <li><strong>实时数据同化:</strong> 与河流测量网络、天气雷达(CINRAD)和基于卫星的降水估计(GPM-IMERG)的集成将使S-AI从情景仿真工具转变为业务预报和短期预测系统。</li>
+                <li><strong>物理信息神经代理:</strong> 在高保真仿真上训练的机器学习模型可以为实时情景筛选提供快速(<1 s)洪水范围近似,物理求解器作为代理校准的地面真值。</li>
+                <li><strong>协作多用户环境:</strong> 仿真状态和3D可视化的WebSocket实时同步将支持洪水紧急情况下的分布式团队决策制定,对并发参数修改进行冲突解决。</li>
+            </ul>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">7.3 结束语</h3>
+            <p style="margin:0 0 15px;line-height:1.9;">在气候变化背景下,洪水灾害代表着一个日益增长的威胁,需要可访问的智能工具进行风险评估和应急管理。S-AI展示了LLM编排工具联邦和自动化工作流编排如何能够使复杂的水动力建模能力民主化,使广泛的专业人士能够获得这些能力,而无需传统HPC基础设施或深厚的计算流体动力学专业知识。我们设想未来的空间智能平台,自然语言成为地理空间仿真和分析的通用接口,使系统能够像人类专家一样理解用户意图,自动选择和编排适当的工具,并提供交互式3D可视化以支持知情决策。</p>
+        </section>
+
+        <!-- Section 8: Appendix -->
+        <section style="margin-bottom:40px;">
+            <h2 style="margin:0 0 20px;font-size:20px;color:#1a73e8;border-left:4px solid #1a73e8;padding-left:12px;">8. 附录:GLSL水着色器代码</h2>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">顶点着色器</h3>
+            <div style="background:#2d2d2d;padding:15px;border-radius:8px;margin:20px 0;overflow-x:auto;">
+                <pre style="margin:0;font-family:'Courier New',monospace;font-size:13px;color:#f8f8f2;white-space:pre-wrap;line-height:1.5;"><strong>// 顶点着色器 (GLSL 300 es)</strong>
+uniform float uTime;
+attribute float aDepth;
+varying float vDepth;
+varying vec3 vNorm;
+varying vec3 vWorldPos;
+
+void main() {
+    vDepth = aDepth;
+    vNorm = normalize(normalMatrix * normal);
+    vec3 pos = position;
+    <strong>// 程序波浪位移 (方程 13)</strong>
+    pos.y += sin(pos.x * 0.02 + uTime * 1.5) * 0.8
+           + cos(pos.z * 0.025 + uTime * 1.2) * 0.6;
+    vec4 wp = modelMatrix * vec4(pos, 1.0);
+    vWorldPos = wp.xyz;
+    gl_Position = projectionMatrix * viewMatrix * wp;
+}</pre>
+            </div>
+
+            <h3 style="margin:25px 0 15px;font-size:18px;color:#333;">片段着色器</h3>
+            <div style="background:#2d2d2d;padding:15px;border-radius:8px;margin:20px 0;overflow-x:auto;">
+                <pre style="margin:0;font-family:'Courier New',monospace;font-size:13px;color:#f8f8f2;white-space:pre-wrap;line-height:1.5;"><strong>// 片段着色器 (GLSL 300 es)</strong>
+uniform vec3 uDeepColor;      <strong>// (0.0, 0.2, 0.4)</strong>
+uniform vec3 uShallowColor;   <strong>// (0.0, 0.67, 1.0)</strong>
+uniform vec3 uFoamColor;      <strong>// (0.67, 0.93, 1.0)</strong>
+uniform float uOpacity;       <strong>// 0.72</strong>
+uniform float uTime;
+varying float vDepth;
+varying vec3 vNorm;
+varying vec3 vWorldPos;
+
+void main() {
+    float t = clamp(vDepth / 3.0, 0.0, 1.0);
+    vec3 base = mix(uShallowColor, uDeepColor, t);
+    <strong>// Fresnel (方程 10)</strong>
+    float fresnel = pow(1.0 - abs(dot(vNorm, vec3(0,1,0))), 2.5);
+    <strong>// Blinn-Phong 镜面 (方程 11)</strong>
+    vec3 viewDir = normalize(cameraPosition - vWorldPos);
+    float spec = pow(max(dot(reflect(-normalize(vec3(0.5,1,0.3)),
+        vNorm), viewDir), 0.0), 64.0);
+    <strong>// 泡沫 (方程 14)</strong>
+    float wave = sin(vWorldPos.x*0.04 + uTime*2.0)
+               * cos(vWorldPos.z*0.03 + uTime*1.5);
+    float foam = smoothstep(0.6, 1.0, wave)
+               * smoothstep(0.01, 0.15, vDepth);
+    <strong>// 最终合成 (方程 15)</strong>
+    vec3 col = base + fresnel * vec3(0.15,0.25,0.35)
+             + spec * vec3(0.9,0.95,1.0) + foam * uFoamColor * 0.3;
+    float alpha = mix(0.5, 0.85, t) + foam * 0.15;
+    gl_FragColor = vec4(col, alpha * uOpacity);
+}</pre>
+            </div>
+        </section>
+
+        <!-- References -->
+        <section style="margin-bottom:40px;">
+            <h2 style="margin:0 0 20px;font-size:20px;color:#1a73e8;border-left:4px solid #1a73e8;padding-left:12px;">参考文献</h2>
+            <ol style="margin:0;padding-left:25px;line-height:1.9;color:#444;">
+                <li>UNDRR. (2020). <em>Global Assessment Report on Disaster Risk Reduction</em>. United Nations Office for Disaster Risk Reduction, Geneva.</li>
+                <li>Bates, P. D., Horritt, M. S., & Fewtrell, T. J. (2010). A simple inertial formulation of the shallow water equations for efficient two-dimensional flood inundation modelling. <em>Journal of Hydrology</em>, 387(1–2), 33–45.</li>
+                <li>Neal, J. C., Villanueva, I., Wright, N., Willis, T., Fewtrell, T., & Bates, P. D. (2012). How much physical complexity is needed to model flood inundation? <em>Hydrological Processes</em>, 26(15), 2264–2282.</li>
+                <li>Hunter, N. M., Bates, P. D., Horritt, M. S., & Wilson, M. D. (2007). Simple spatially distributed models for predicting flood inundation: A review. <em>Geomorphology</em>, 90(3–4), 208–225.</li>
+                <li>Brunner, G. W. (2016). HEC-RAS River Analysis System: 2D Modeling User's Manual. <em>US Army Corps of Engineers</em>, Davis, CA.</li>
+                <li>Rossman, L. A. (2015). Storm Water Management Model User's Manual Version 5.1. <em>US Environmental Protection Agency</em>.</li>
+                <li>Hervouet, J.-M. (2007). <em>Hydrodynamics of Free Surface Flows: Modelling with the Finite Element Method</em>. John Wiley & Sons.</li>
+                <li>Sampson, C. C., Smith, A. M., Bates, P. D., Neal, J. C., & Trigg, M. A. (2015). A high-resolution global flood hazard model. <em>Water Resources Research</em>, 51(9), 7358–7381.</li>
+                <li>Keifer, C. J., & Chu, H. H. (1957). Synthetic storm pattern for drainage design. <em>Journal of the Hydraulics Division</em>, 83(4), 1–25.</li>
+                <li>Chow, V. T. (1959). <em>Open-Channel Hydraulics</em>. McGraw-Hill, New York.</li>
+                <li>Courant, R., Friedrichs, K., & Lewy, H. (1928). Über die partiellen Differenzengleichungen der mathematischen Physik. <em>Mathematische Annalen</em>, 100(1), 32–74.</li>
+                <li>Bowyer, A. (1981). Computing Dirichlet tessellations. <em>The Computer Journal</em>, 24(2), 162–166.</li>
+                <li>Watson, D. F. (1981). Computing the n-dimensional Delaunay tessellation with application to Voronoi polytopes. <em>The Computer Journal</em>, 24(2), 167–172.</li>
+                <li>Schlick, C. (1994). An inexpensive BRDF model for physically-based rendering. <em>Computer Graphics Forum</em>, 13(3), 233–246.</li>
+                <li>Blinn, J. F. (1977). Models of light reflection for computer synthesized pictures. <em>ACM SIGGRAPH Computer Graphics</em>, 11(2), 192–198.</li>
+                <li>Wu, Q., Bansal, G., Zhang, J., et al. (2023). AutoGen: Enabling next-gen LLM applications via multi-agent conversation. <em>arXiv preprint arXiv:2308.08155</em>.</li>
+                <li>Pereira, J. (2023). CrewAI: Framework for orchestrating role-playing autonomous AI agents. <em>GitHub repository</em>, https://github.com/joaomdmoura/crewAI.</li>
+                <li>LangChain Inc. (2024). LangGraph: Build stateful, multi-actor applications with LLMs. https://langchain-ai.github.io/langgraph/.</li>
+                <li>Guo, T., Chen, X., Wang, Y., et al. (2024). Large language model based multi-agents: A survey of progress and challenges. <em>arXiv preprint arXiv:2402.01680</em>.</li>
+                <li>Anthropic. (2024). Model Context Protocol: An open standard for connecting AI models to data and tools. https://modelcontextprotocol.io/.</li>
+                <li>OpenAI. (2023). GPT-4 Technical Report. <em>arXiv preprint arXiv:2303.08774</em>.</li>
+                <li>Gorelick, N., Hancher, M., Dixon, M., et al. (2017). Google Earth Engine: Planetary-scale geospatial analysis for everyone. <em>Remote Sensing of Environment</em>, 202, 18–27.</li>
+                <li>USDA Soil Conservation Service. (1986). <em>Urban Hydrology for Small Watersheds</em>. Technical Release 55 (TR-55).</li>
+            </ol>
+        </section>
+
+        <!-- Footer -->
+        <footer style="text-align:center;margin-top:50px;padding-top:30px;border-top:1px solid #e0e0e0;color:#999;font-size:14px;">
+            <p style="margin:0;">© 2024 S-AI Research Team. All rights reserved.</p>
+        </footer>
+
+    </div>
+</body>
+</html>
