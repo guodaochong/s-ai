@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
+import re
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
 import httpx
+import numpy as np
 import structlog
 import uvicorn
 from dotenv import load_dotenv
@@ -16,136 +20,124 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import UploadFile, File as FastAPIFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 logger = structlog.get_logger(__name__)
 
 ZHIPUAI_API_KEY = os.getenv("ZHIPUAI_API_KEY", "")
+GLM_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 
-SYSTEM_PROMPT = """你是 S-AI 水利空间智能体平台的调度中心，具备专业水利工程师和空间分析师的双重身份。回复要专业、简洁、有条理。\n\n【平台能力】\n- 8个MCP服务器，36个水利+空间分析工具\n- 真实DEM数据（甘肃迭部0.5m高精度地形）\n- LLM意图路由 + 拖拽工作流编排 + 自然语言调用\n- 8个智能体协同：Knowledge知识库/Hydro水力/GIS地理/Flood洪水/Raster地形/Map地图/Data数据/Router调度\n\n【交互规则】\n- 用户问候（"你好/在吗"）→ 专业自我介绍+能力列表+引导提问\n- 用户提需求 → 选择合适工具，从描述中提取实际参数\n- 用户在地图上点击 → 提示"已捕获坐标，正在执行空间情报分析..."\n- 任何错误时 → 不要沉默或重试3次，要明确告诉用户错在哪 + 给出替代方案\n- 涉及具体数值计算时，**必须调用工具**获得真实结果，不要凭空捏造数字\n\n可用工具列表：
-1. knowledge.get_parameter - 查询水利参数
-   参数: parameter_name(manning_n/scs_cn/design_storm), conditions(dict, 如{"surface":"混凝土管道"}或{"city":"北京"})
-2. knowledge.search - 知识库搜索
-   参数: query(str)
-3. hydro.design_storm - 生成设计暴雨雨型
-   参数: city(beijing/shanghai/shenzhen/guangzhou/chengdu), return_period(int, 重现期年数), duration_minutes(int, 降雨历时)
-4. hydro.runoff_compute - SCS-CN径流计算
-   参数: rainfall_mm(float, 降雨量毫米), curve_number(int, CN值, 城市50-70/郊区30-50/农田20-40), drainage_area_ha(float, 汇水面积公顷)
-5. hydro.swmm_create_model - 创建SWMM排水模型
-   参数: project_name(str), area_hectares(float), impervious_percent(float, 不透水面积百分比), n_subcatchments(int, 子汇水区数量)
-6. hydro.swmm_simulate - 运行SWMM模拟
-   参数: project_name(str), rainfall_mm_hr(float, 降雨强度mm/h), duration_min(int)
-7. hydro.calibrate_suggest - 模型率定建议
-   参数: observed_peak_flow(float), simulated_peak_flow(float), nash_sutcliffe(float)
-8. flood.flood_inundation_map - 生成淹没范围图（地图上渲染GeoJSON）
-   参数: center_lng(float), center_lat(float), radius_m(float, 淹没半径米), max_depth_m(float, 最大水深米)
-9. flood.flood_assessment - 内涝风险评估（数值计算）
-   参数: rainfall_mm(float), drainage_area_ha(float), impervious_pct(float, 不透水比例), pipe_capacity_cms(float, 管道排水能力)
-10. flood.drainage_assessment - 排水能力校核（Manning公式）
-    参数: pipe_diameter_m(float, 管径米), pipe_slope(float, 坡度), manning_n(float, 糙率0.01-0.03), design_flow_cms(float, 设计流量)
-11. flood.flood_warning - 洪水预警
-    参数: current_rainfall_mm_hr(float), forecast_rainfall_mm_hr(float), soil_saturation_pct(float, 0-100), drainage_utilization_pct(float, 0-100)
-12. flood.flood_risk_zones - 风险分区
-    参数: population_density(float, 人/km2), infrastructure_density(float, 0-1)
-13. flood.hydrodynamic_2d_sim - 二维水动力淹没演进模拟（LISFLOOD-FP diffusive wave）
-    参数: duration_hours(float, 模拟时长), output_interval_hours(float, 输出间隔), rainfall_pattern(str, uniform/triangular/chicago), total_rainfall_mm(float)
-    返回多帧GeoJSON等值线，前端自动动画播放。当用户提到水动力、淹没演进、洪水演进、动态模拟时调用此工具
-13. raster.dem_analyze - DEM地形分析（坡度/坡向/流向）
-    参数: compute_slope(bool), compute_aspect(bool), compute_flowdir(bool)
-    当用户提到坡度、地形、DEM分析时必须调用此工具
-14. raster.watershed_delineate - 流域提取
-    参数: outlet_lng(float), outlet_lat(float)
-15. raster.terrain_profile - 地形剖面
-    参数: start_lng(float), start_lat(float), end_lng(float), end_lat(float)
-16. raster.flow_accumulation - 汇流累积分析
-    参数: threshold_cells(int)
- 17. gis.buffer - 缓冲区分析
-    参数: distance(float, 公里)
- 18. gis.overlay - 叠加分析
-    参数: operation(intersection/union/difference)
- 19. gis.import_network - 导入上传的管网GIS数据
-    参数: file_name(str, 上传文件名) 或 file_path(str, 完整路径)
- 20. raster.point_query - 空间情报点查询（点击地图上某点获取完整空间属性）
-    参数: lng(float), lat(float), search_radius_m(float, 默认500)
-    用于查询某点的高程/坡度/坡向/曲率/TPI/TRI/地形分类
- 21. raster.tin_generate - TIN三角网生成（不规则三角网剖分）
-    参数: lng_min/lng_max/lat_min/lat_max, max_points(int), refine_steep(bool)
- 22. raster.quadtree_subdivide - 四叉树自适应剖分（基于地形复杂度）
-    参数: lng_min/lng_max/lat_min/lat_max, max_depth(int), variance_threshold(float)
+MODEL_FLASH = "glm-4-flash-250414"
+MODEL_AIR = "glm-4-air-250414"
 
-UI操作指令（直接触发前端动作，不调用工具）：
-- 用户说"3D/三维/立体/heightmap/三维场景/三维地形" → 返回 {"ui_action": "open_3d", "reply": "🛰️ 正在为您打开三维地形查看器..."}
-- 用户说"三角网/TIN/不规则三角网" → 返回 {"ui_action": "open_tin", "reply": "🔺 正在生成TIN三角网..."}
-- 用户说"四叉树/Quadtree/嵌套剖分/自适应剖分" → 返回 {"ui_action": "open_quadtree", "reply": "🌳 正在生成四叉树剖分..."}
-- ⚠️ 关键判断规则：
-  * "三维场景/3D看/立体可视化" → open_3d (UI)，**不是** dem_analyze
-  * "三角网/TIN" → open_tin (UI)
-  * "坡度/坡向/高程/统计" → dem_analyze (工具)
-  * "剖面/断面" → terrain_profile (工具)
-  * 任何UI操作关键词出现时，**优先返回ui_action**，不要调用工具
+CACHE_MAX = 200
+CACHE_TTL = 300
+MAX_CONTEXT_CHARS = 4000
+BREAKER_THRESHOLD = 3
+BREAKER_COOLDOWN = 120
 
-参数提取规则：
-- 从用户描述中提取实际数值作为参数，不要用默认值
-- 面积: "200公顷"→200, "5平方公里"→500, "2km2"→200
-- 降雨: "100mm"→100, "50年一遇"→return_period=50, "100年一遇"→return_period=100
-- 城市: "北京"→city="beijing", "上海"→"shanghai", "深圳"→"shenzhen", "广州"→"guangzhou", "成都"→"chengdu"
-- 不透水: "城市中心"→70-80, "城区"→55-70, "郊区"→30-50, "农村"→10-25
-- 管径: "DN800"→0.8m, "DN1000"→1.0m, "DN600"→0.6m（这是管径，不是排水能力）
-- 坐标默认北京 116.397, 39.908，用户指定其他城市时调整
-- 用户没给的参数根据上下文合理推断，不要用固定默认值
-
-重要规则：
-- 如果用户描述中缺少关键参数（如面积、降雨量等），不要自己编造数值
-- 应该先回复用户，列出缺少的参数并请用户补充
-- 回复格式：{"reply": "为了进行XX分析，还需要以下信息：\n1. [缺少的参数1]（说明）\n2. [缺少的参数2]（说明）\n\n请补充以上信息。"}
-- 只有当参数基本齐全时才调用工具
-- 简单问候、闲聊等不需要工具的，直接回复即可
-- 你是水利工程师角色，回复要专业、准确、有条理
-
-回复格式（严格JSON，不要加注释，不要加```代码块标记，直接输出JSON）：
-- 需要调用工具时：{"tools": [{"server": "flood", "tool": "flood_inundation_map", "arguments": {"radius_m": 2000, "max_depth_m": 2.0}}]}
-- 注意：tool字段只写工具名，不要加server前缀。正确："tool":"design_storm"，错误："tool":"hydro.design_storm"
-- 纯文字回复时：{"reply": "你的回答"}
-- UI动作（3D/TIN/Quadtree）时：{"ui_action": "open_3d", "reply": "简短说明"}
-- 可以同时调用多个工具，按顺序串行执行
-- 当用户提到内涝/淹没/洪水/积水时，必须同时调用 flood.flood_inundation_map 在地图上渲染
-- 当用户提到流域/汇水时，必须同时调用 raster.watershed_delineate 在地图上渲染
-- 用户提到水位时，从消息中提取水位值传入 water_level_m 参数
-- 用户提到"3D/三维/立体场景"时，**绝不能**调用 raster.dem_analyze！必须返回 ui_action: open_3d
-- DEM数据位于甘肃迭部(104.89°E, 33.19°N)，flood_inundation_map 无需传坐标，会自动定位有效DEM区域
-
-编排工作流调用规则：
-- 用户说"跑/执行/运行XX流程/方案/工作流"时，如果XX匹配已知编排方案名称，回复：{"reply": "好的，正在执行【执行流程：XX】编排方案..."}
-- 已知的编排方案包括：地形分析（DEM坡度→河网提取→流域提取→地形渲染）、洪水分析（DEM分析→淹没模拟→洪水预警→风险分区）
-- 用户也可以自定义编排方案并在对话中调用
-- 回复中必须包含【执行流程：方案名】标记，系统会自动识别并执行对应的编排方案"""
+_tool_cache: OrderedDict[str, tuple[float, Any]] = OrderedDict()
+_circuit_breaker: dict[str, tuple[int, float]] = {}
+_last_cache_sweep = time.time()
 
 MCP_SERVERS = {
+    "knowledge": "http://127.0.0.1:5003",
     "gis": "http://127.0.0.1:5001",
     "data": "http://127.0.0.1:5002",
-    "knowledge": "http://127.0.0.1:5003",
     "map": "http://127.0.0.1:5004",
     "hydro": "http://127.0.0.1:5005",
     "flood": "http://127.0.0.1:5006",
     "raster": "http://127.0.0.1:5007",
 }
 
-async def _call_llm(messages: list[dict]) -> tuple[str, str]:
-    headers = {"Authorization": f"Bearer {ZHIPUAI_API_KEY}", "Content-Type": "application/json"}
-    payload = {"model": "glm-4-air-250414", "messages": messages, "temperature": 0.1, "max_tokens": 1024}
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post("https://open.bigmodel.cn/api/coding/paas/v4/chat/completions", headers=headers, json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-        msg = data["choices"][0]["message"]
-        content = msg.get("content", "") or ""
-        reasoning = msg.get("reasoning_content", "") or ""
-        return content, reasoning
+MAX_REACT_STEPS = 8
+
+AGENT_LABELS = {
+    "gis": "GIS 空间分析", "knowledge": "Knowledge 知识查询", "data": "Data 数据操作",
+    "map": "Map 地图渲染", "hydro": "Hydro 水文计算", "flood": "Flood 洪水分析",
+    "raster": "Raster 地形分析",
+}
+
+GLM_TOOLS = [
+    {"type": "function", "function": {"name": "get_parameter", "description": "查询水利参数表(manning_n糙率/scs_cn曲线数/design_storm暴雨/pipe_specs管材/pump_specs水泵/lid_design海绵/drainage_design排水标准)", "parameters": {"type": "object", "properties": {"parameter_name": {"type": "string", "description": "参数表名: manning_n, scs_cn, design_storm, pipe_specs, pump_specs, lid_design, drainage_design"}, "conditions": {"type": "object", "description": "过滤条件, 如 {\"surface\": \"混凝土管道\"} 或 {\"city\": \"成都\"}", "properties": {}}}, "required": ["parameter_name"]}}},
+    {"type": "function", "function": {"name": "search", "description": "知识库语义搜索", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "搜索关键词"}}, "required": ["query"]}}},
+    {"type": "function", "function": {"name": "get_standard", "description": "查询水利标准规范", "parameters": {"type": "object", "properties": {"standard_id": {"type": "string", "description": "标准编号如 GB50014"}, "keyword": {"type": "string", "description": "关键词搜索"}}, "required": ["standard_id"]}}},
+    {"type": "function", "function": {"name": "explain_concept", "description": "解释水利专业概念(水文/水力/排水/防洪)", "parameters": {"type": "object", "properties": {"concept": {"type": "string", "description": "概念名称, 如'曼宁公式'、'SCS-CN'、'设计暴雨'"}, "detail_level": {"type": "string", "enum": ["brief", "detailed", "technical"], "description": "详细程度", "default": "detailed"}}, "required": ["concept"]}}},
+    {"type": "function", "function": {"name": "spatial_query", "description": "空间关系查询(intersects/contains/within/touches/crosses等)", "parameters": {"type": "object", "properties": {"geometry_a": {"type": "object", "description": "GeoJSON geometry"}, "geometry_b": {"type": "object", "description": "GeoJSON geometry"}, "relation": {"type": "string", "enum": ["intersects", "contains", "within", "touches", "crosses", "overlaps", "equals", "disjoint"], "default": "intersects"}}, "required": ["geometry_a", "geometry_b"]}}},
+    {"type": "function", "function": {"name": "buffer", "description": "创建几何缓冲区", "parameters": {"type": "object", "properties": {"geometry": {"type": "object", "description": "GeoJSON geometry"}, "distance": {"type": "number", "description": "缓冲距离(米)"}, "unit": {"type": "string", "default": "meters"}}, "required": ["geometry"]}}},
+    {"type": "function", "function": {"name": "overlay", "description": "叠加分析(intersection/union/difference/symmetric_difference)", "parameters": {"type": "object", "properties": {"geometry_a": {"type": "object", "description": "GeoJSON geometry"}, "geometry_b": {"type": "object", "description": "GeoJSON geometry"}, "operation": {"type": "string", "enum": ["intersection", "union", "difference", "symmetric_difference"], "default": "intersection"}}, "required": ["geometry_a", "geometry_b"]}}},
+    {"type": "function", "function": {"name": "coordinate_transform", "description": "坐标系转换(WGS84↔CGCS2000等)", "parameters": {"type": "object", "properties": {"geometry": {"type": "object", "description": "GeoJSON geometry"}, "source_crs": {"type": "integer", "description": "源EPSG代码"}, "target_crs": {"type": "integer", "description": "目标EPSG代码"}}, "required": ["geometry", "source_crs", "target_crs"]}}},
+    {"type": "function", "function": {"name": "geometry_properties", "description": "几何属性计算(面积/周长/质心/类型)", "parameters": {"type": "object", "properties": {"geometry": {"type": "object", "description": "GeoJSON geometry"}}, "required": ["geometry"]}}},
+    {"type": "function", "function": {"name": "import_network", "description": "导入管网/河网矢量数据", "parameters": {"type": "object", "properties": {"file_name": {"type": "string", "description": "文件名"}}, "required": ["file_name"]}}},
+    {"type": "function", "function": {"name": "import_data", "description": "导入空间数据(GeoJSON)到数据库", "parameters": {"type": "object", "properties": {"data": {"type": "object", "description": "GeoJSON FeatureCollection"}, "table_name": {"type": "string", "description": "目标表名"}}, "required": ["data", "table_name"]}}},
+    {"type": "function", "function": {"name": "validate_data", "description": "数据质量验证(拓扑/属性/坐标系)", "parameters": {"type": "object", "properties": {"data": {"type": "object", "description": "GeoJSON数据"}, "checks": {"type": "array", "items": {"type": "string"}, "description": "检查项: topology, attributes, crs"}}, "required": ["data"]}}},
+    {"type": "function", "function": {"name": "render_map", "description": "渲染静态地图图像(PNG)", "parameters": {"type": "object", "properties": {"layers": {"type": "array", "items": {"type": "object"}, "description": "图层数据列表"}, "title": {"type": "string", "description": "地图标题"}}, "required": ["layers"]}}},
+    {"type": "function", "function": {"name": "design_storm", "description": "生成设计暴雨雨型(Chicago时程分布)", "parameters": {"type": "object", "properties": {"city": {"type": "string", "enum": ["beijing", "shanghai", "shenzhen", "guangzhou", "chengdu"], "description": "城市"}, "return_period": {"type": "integer", "description": "重现期(年), 如50年一遇=50"}, "duration_minutes": {"type": "integer", "description": "降雨历时(分钟)"}, "time_step_minutes": {"type": "integer", "description": "时间步长(分钟)", "default": 5}}, "required": ["city", "return_period"]}}},
+    {"type": "function", "function": {"name": "runoff_compute", "description": "SCS-CN法径流计算", "parameters": {"type": "object", "properties": {"rainfall_mm": {"type": "number", "description": "降雨量(毫米)"}, "curve_number": {"type": "integer", "description": "SCS曲线数CN值(城市50-70/郊区30-50/农田20-40)"}, "drainage_area_ha": {"type": "number", "description": "汇水面积(公顷)"}}, "required": ["rainfall_mm", "curve_number", "drainage_area_ha"]}}},
+    {"type": "function", "function": {"name": "swmm_create_model", "description": "创建EPA SWMM排水管网模型", "parameters": {"type": "object", "properties": {"project_name": {"type": "string", "description": "项目名称"}, "area_hectares": {"type": "number", "description": "面积(公顷)"}, "impervious_percent": {"type": "number", "description": "不透水面积百分比(0-100)"}, "n_subcatchments": {"type": "integer", "description": "子汇水区数量"}}, "required": ["project_name", "area_hectares"]}}},
+    {"type": "function", "function": {"name": "swmm_simulate", "description": "运行SWMM排水模拟", "parameters": {"type": "object", "properties": {"project_name": {"type": "string", "description": "项目名称"}, "rainfall_mm_hr": {"type": "number", "description": "降雨强度(mm/h)"}, "duration_min": {"type": "integer", "description": "模拟时长(分钟)"}}, "required": ["rainfall_mm_hr", "duration_min"]}}},
+    {"type": "function", "function": {"name": "calibrate_suggest", "description": "模型率定建议(NSE/RMSE/参数调整)", "parameters": {"type": "object", "properties": {"observed_peak_flow": {"type": "number", "description": "实测洪峰流量(m³/s)"}, "simulated_peak_flow": {"type": "number", "description": "模拟洪峰流量(m³/s)"}, "nash_sutcliffe": {"type": "number", "description": "Nash-Sutcliffe效率系数"}}, "required": ["observed_peak_flow", "simulated_peak_flow", "nash_sutcliffe"]}}},
+    {"type": "function", "function": {"name": "flood_inundation_map", "description": "生成洪水淹没范围图(GeoJSON渲染到地图). DEM在甘肃迭部(104.89°E,33.19°N), 无需传坐标会自动定位", "parameters": {"type": "object", "properties": {"radius_m": {"type": "number", "description": "淹没分析半径(米)", "default": 2000}, "max_depth_m": {"type": "number", "description": "最大水深(米)", "default": 2.0}, "water_level_m": {"type": "number", "description": "指定水位(米, 可选)"}, "rainfall_mm": {"type": "number", "description": "降雨量(毫米)"}}, "required": []}}},
+    {"type": "function", "function": {"name": "flood_assessment", "description": "城市内涝风险评估(数值计算)", "parameters": {"type": "object", "properties": {"rainfall_mm": {"type": "number", "description": "降雨量(毫米)"}, "drainage_area_ha": {"type": "number", "description": "汇水面积(公顷)"}, "impervious_pct": {"type": "number", "description": "不透水面积比例(0-100)"}, "pipe_capacity_cms": {"type": "number", "description": "管道排水能力(m³/s)"}}, "required": ["rainfall_mm", "drainage_area_ha"]}}},
+    {"type": "function", "function": {"name": "drainage_assessment", "description": "排水管道能力校核(Manning公式)", "parameters": {"type": "object", "properties": {"pipe_diameter_m": {"type": "number", "description": "管径(米)"}, "pipe_slope": {"type": "number", "description": "管道坡度"}, "manning_n": {"type": "number", "description": "曼宁糙率(0.01-0.03)"}, "design_flow_cms": {"type": "number", "description": "设计流量(m³/s)"}}, "required": ["pipe_diameter_m", "pipe_slope"]}}},
+    {"type": "function", "function": {"name": "flood_warning", "description": "洪水预警评估(风险等级+建议措施)", "parameters": {"type": "object", "properties": {"current_rainfall_mm_hr": {"type": "number", "description": "当前降雨强度(mm/h)"}, "forecast_rainfall_mm_hr": {"type": "number", "description": "预报降雨强度(mm/h)"}, "soil_saturation_pct": {"type": "number", "description": "土壤饱和度(0-100)"}, "drainage_utilization_pct": {"type": "number", "description": "排水设施利用率(0-100)"}}, "required": ["current_rainfall_mm_hr"]}}},
+    {"type": "function", "function": {"name": "flood_risk_zones", "description": "洪水风险分区(按人口/基础设施密度)", "parameters": {"type": "object", "properties": {"population_density": {"type": "number", "description": "人口密度(人/km²)"}, "infrastructure_density": {"type": "number", "description": "基础设施密度(0-1)"}}, "required": []}}},
+    {"type": "function", "function": {"name": "hydrodynamic_2d_sim", "description": "二维水动力淹没演进模拟(LISFLOOD-FP扩散波求解器, 基于真实0.5m DEM, 结果可在3D场景播放动画)", "parameters": {"type": "object", "properties": {"duration_hr": {"type": "integer", "description": "模拟时长(小时)", "default": 24}, "output_steps": {"type": "integer", "description": "输出帧数", "default": 12}, "rain_pattern": {"type": "string", "enum": ["chicago", "uniform"], "description": "雨型", "default": "chicago"}, "rainfall_mm": {"type": "number", "description": "总降雨量(毫米)", "default": 120}}, "required": []}}},
+    {"type": "function", "function": {"name": "dem_analyze", "description": "DEM地形分析(坡度/坡向/汇流方向统计)", "parameters": {"type": "object", "properties": {"compute_slope": {"type": "boolean", "description": "计算坡度", "default": True}, "compute_aspect": {"type": "boolean", "description": "计算坡向", "default": True}, "compute_flowdir": {"type": "boolean", "description": "计算汇流方向", "default": True}}, "required": []}}},
+    {"type": "function", "function": {"name": "watershed_delineate", "description": "流域提取与河网分析(D8算法, 面积/密度/分级)", "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "flow_accumulation", "description": "汇流累积计算与河网自动提取(Strahler分级)", "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "terrain_profile", "description": "地形剖面线分析(两点间高程变化)", "parameters": {"type": "object", "properties": {"start_lng": {"type": "number", "description": "起点经度"}, "start_lat": {"type": "number", "description": "起点纬度"}, "end_lng": {"type": "number", "description": "终点经度"}, "end_lat": {"type": "number", "description": "终点纬度"}}, "required": ["start_lng", "start_lat", "end_lng", "end_lat"]}}},
+    {"type": "function", "function": {"name": "point_query", "description": "地图点位查询(高程/坡度/坡向/曲率/TPI)", "parameters": {"type": "object", "properties": {"lng": {"type": "number", "description": "经度"}, "lat": {"type": "number", "description": "纬度"}}, "required": ["lng", "lat"]}}},
+    {"type": "function", "function": {"name": "dem_render", "description": "DEM渲染(等高线/阴影浮雕图)", "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "tin_generate", "description": "生成TIN不规则三角网(三维地形网格)", "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "quadtree_subdivide", "description": "四叉树自适应地形剖分", "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "create_choropleth", "description": "创建专题地图(分类着色)", "parameters": {"type": "object", "properties": {"data": {"type": "object", "description": "数据GeoJSON"}, "value_field": {"type": "string", "description": "数值字段名"}, "colormap": {"type": "string", "description": "配色方案", "default": "YlOrRd"}}, "required": ["data", "value_field"]}}},
+    {"type": "function", "function": {"name": "plot_timeseries", "description": "绘制时间序列图表(降雨/水位/流量过程线)", "parameters": {"type": "object", "properties": {"data": {"type": "object", "description": "时序数据"}, "title": {"type": "string", "description": "图表标题"}}, "required": ["data"]}}},
+    {"type": "function", "function": {"name": "query_spatial", "description": "空间SQL查询(PostGIS只读)", "parameters": {"type": "object", "properties": {"sql": {"type": "string", "description": "SQL查询语句(仅SELECT)"}}, "required": ["sql"]}}},
+    {"type": "function", "function": {"name": "export_geojson", "description": "导出GeoJSON数据文件", "parameters": {"type": "object", "properties": {"data": {"type": "object", "description": "GeoJSON数据"}, "filename": {"type": "string", "description": "文件名"}}, "required": ["data"]}}},
+]
+
+TOOL_TO_SERVER = {}
+for _srv, _tools in {
+    "knowledge": ["get_parameter", "search", "get_standard", "explain_concept"],
+    "gis": ["spatial_query", "buffer", "overlay", "coordinate_transform", "geometry_properties", "read_vector", "write_vector", "import_network"],
+    "data": ["import_data", "query_spatial", "query_by_geometry", "validate_data", "list_tables"],
+    "map": ["render_map", "create_choropleth", "plot_timeseries", "export_geojson"],
+    "hydro": ["design_storm", "runoff_compute", "swmm_create_model", "swmm_simulate", "calibrate_suggest"],
+    "flood": ["flood_inundation_map", "flood_assessment", "drainage_assessment", "flood_warning", "flood_risk_zones", "hydrodynamic_2d_sim"],
+    "raster": ["dem_analyze", "watershed_delineate", "flow_accumulation", "terrain_profile", "point_query", "dem_render", "tin_generate", "quadtree_subdivide"],
+}.items():
+    for _t in _tools:
+        TOOL_TO_SERVER[_t] = _srv
+
+REACT_SYSTEM_PROMPT = """你是 S-AI 水利空间智能体，具备自主推理能力。专业水利工程师和空间分析师。
+
+DEM数据位于甘肃迭部县(104.89°E, 33.19°N)，0.5m分辨率，3GB GeoTIFF。
+
+必须调工具的场景（不要直接回复文字，必须调工具）：
+- 进行/运行/执行 模拟、计算、分析 → 调对应工具
+- 查/查询 参数、数值 → 调 get_parameter
+- 涉及具体数值 → 必须调工具，不要捏造
+- 用户提到内涝/淹没/洪水/积水 → 必须调 flood_inundation_map
+
+可以不调工具的场景：
+- 纯寒暄（你好/谢谢/再见）
+
+推理规则：
+- 复合任务需多步推理：先获取参数→再计算→最后评估
+- 参数从对话上下文提取实际值，不要编造
+- 工具返回错误时分析原因并调整参数重试
+- 回复专业、准确、有条理"""
+
+
+def _sse(data: dict) -> str:
+    return f"data: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
 
 def _detect_ui_action(msg: str) -> str:
-    m = msg.lower()
     if any(k in msg for k in ["三角网", "TIN", "不规则三角"]):
         return "open_tin"
     if any(k in msg for k in ["四叉树", "Quadtree", "嵌套剖分", "自适应剖分"]):
@@ -155,55 +147,308 @@ def _detect_ui_action(msg: str) -> str:
     return ""
 
 
-def _parse_llm_response(text: str) -> tuple[list[tuple[str, str, dict]], str]:
-    import re
+def _compress_result(tool: str, result: dict) -> str:
+    if "error" in result:
+        return f"ERROR: {result['error']}"
+    if tool == "design_storm":
+        return f"暴雨: P={result.get('return_period_years','?')}年 峰值={result.get('peak_intensity_mm_per_hr','?')}mm/h 总量={result.get('total_depth_mm','?')}mm"
+    if tool == "runoff_compute":
+        return f"径流: 降雨{result.get('rainfall_mm','?')}mm CN={result.get('curve_number','?')} → 径流{result.get('runoff_depth_mm','?')}mm 体积{result.get('runoff_volume_m3','?')}m³"
+    if tool == "hydrodynamic_2d_sim":
+        return f"2D模拟: {len(result.get('frames',[]))}帧 峰值水深={result.get('peak_max_depth_m','?')}m 网格={result.get('grid_size','?')}"
+    if tool == "flood_assessment":
+        return f"内涝: 风险={result.get('risk_level','?')} 积水={result.get('avg_flood_depth_cm','?')}cm 溢流={result.get('overflow_volume_m3','?')}m³"
+    if tool == "flood_inundation_map":
+        return f"淹没: {len(result.get('rings',[]))}级 面积={result.get('total_flood_area_m2','?')}m²"
+    if tool == "dem_analyze":
+        s = result.get('slope', {})
+        return f"地形: 坡度{s.get('mean_deg','?')}° 坡向={result.get('aspect',{}).get('dominant','?')}"
+    if tool == "watershed_delineate":
+        return f"流域: {result.get('watershed_area_km2','?')}km² 密度={result.get('drainage_density','?')}km/km²"
+    if tool == "flow_accumulation":
+        return f"河网: {result.get('n_streams','?')}条 总长{result.get('total_stream_length_km','?')}km"
+    if tool == "drainage_assessment":
+        return f"排水: 满管{result.get('full_flow_capacity_cms','?')}cms {'达标' if result.get('status')=='adequate' else '不足'}"
+    if tool == "flood_warning":
+        return f"预警: {result.get('warning_level','?')}级 风险={result.get('risk_score','?')}"
+    if tool == "get_parameter":
+        entries = result.get("results", [])
+        return f"参数({result.get('parameter','?')}): {len(entries)}条 " + "; ".join(json.dumps(e, ensure_ascii=False)[:80] for e in entries[:3])
+    if tool == "swmm_simulate":
+        return f"SWMM: 峰值{result.get('peak_flow_cms','?')}cms 水深{result.get('max_depth_m','?')}m 溢流{result.get('flooding_pct','?')}%"
+    if tool == "calibrate_suggest":
+        return f"率定: NSE={result.get('nash_sutcliffe','?')} 误差{result.get('error_pct','?')}%"
+    if tool == "point_query":
+        return f"点位: 高程={result.get('elevation_m','?')}m 坡度={result.get('slope_deg','?')}°"
+    if tool == "terrain_profile":
+        return f"剖面: 长{result.get('total_distance_m','?')}m 高差{round(result.get('max_elevation_m',0)-result.get('min_elevation_m',0),1)}m"
+    return json.dumps(result, ensure_ascii=False)[:200]
+
+
+async def _call_llm(messages: list[dict], model: str = MODEL_FLASH, use_tools: bool = True) -> tuple[str, str, list[dict]]:
+    headers = {"Authorization": f"Bearer {ZHIPUAI_API_KEY}", "Content-Type": "application/json"}
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.1,
+        "max_tokens": 1024,
+    }
+    if use_tools and GLM_TOOLS:
+        payload["tools"] = GLM_TOOLS
+        payload["tool_choice"] = "auto"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(GLM_API_URL, headers=headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        msg = data["choices"][0]["message"]
+        content = msg.get("content", "") or ""
+        reasoning = msg.get("reasoning_content", "") or ""
+        tool_calls = msg.get("tool_calls") or []
+        return content, reasoning, tool_calls
+
+
+SIMPLE_KEYWORDS = {"你好", "谢谢", "再见", "hello", "hi", "拜拜", "早上好", "晚上好", "谢谢啦", "哈喽"}
+
+ROUTING_RULES: list[tuple[str, str]] = [
+    (r"水动力|淹没模拟|洪水模拟|二维模拟|洪水演进", "hydrodynamic_2d_sim"),
+    (r"什么是|解释|介绍.*概念|原理是|怎么理解|什么是.*公式", "explain_concept"),
+    (r"糙率|曲线数|CN值|管材|水泵|海绵|排水标准|暴雨参数", "get_parameter"),
+    (r"河网|水流累积|汇流", "flow_accumulation"),
+    (r"流域|汇水|子流域", "watershed_delineate"),
+    (r"高程|坡度|查点|点位查询", "point_query"),
+    (r"剖面|断面", "terrain_profile"),
+    (r"地形分析|DEM分析|地形特征", "dem_analyze"),
+    (r"TIN|三角网|不规则三角", "tin_generate"),
+    (r"四叉树|自适应剖分|嵌套剖分", "quadtree_subdivide"),
+    (r"暴雨雨型|设计暴雨|暴雨强度", "design_storm"),
+    (r"径流|产流|汇流量", "runoff_compute"),
+    (r"淹没范围|淹没地图|淹没面积|淹没图|会不会被水淹|积水", "flood_inundation_map"),
+    (r"洪水风险|内涝评估|风险评估", "flood_assessment"),
+    (r"排水能力|排水评估|排水系统", "drainage_assessment"),
+    (r"洪水预警|预警|防汛预警", "flood_warning"),
+    (r"风险分区|风险等级|风险区域", "flood_risk_zones"),
+    (r"渲染|出图|画图|绘制地图", "render_map"),
+    (r"管网|SWMM|swmm|排水管网", "swmm_simulate"),
+    (r"空间关系|相交|包含|相邻|空间查询", "spatial_query"),
+    (r"缓冲区|缓冲|周边范围", "buffer"),
+    (r"叠加|交集|并集|差集|叠加分析", "overlay"),
+    (r"坐标转换|坐标系转换", "coordinate_transform"),
+    (r"搜索|查找资料|知识库", "search"),
+    (r"标准|规范|GB|SL|设计规范", "get_standard"),
+    (r"率定|校准|参数优化", "calibrate_suggest"),
+    (r"河网渲染|DEM渲染|地形渲染", "dem_render"),
+    (r"模拟|计算|运行.*分析|进行.*分析|开启.*计算", "hydrodynamic_2d_sim"),
+]
+
+TOOL_CORPUS = [
+    ("查询水利参数 糙率 曲线数 暴雨参数 管材 水泵 海绵 排水标准", "get_parameter"),
+    ("知识库语义搜索 查找资料", "search"),
+    ("查询水利标准规范 GB SL", "get_standard"),
+    ("解释水利专业概念 水文 水力 排水 防洪 曼宁公式 原理", "explain_concept"),
+    ("空间关系查询 相交 包含 穿越 触碰", "spatial_query"),
+    ("创建几何缓冲区 周边范围", "buffer"),
+    ("叠加分析 交集 并集 差集", "overlay"),
+    ("坐标系转换 EPSG WGS84 CGCS2000", "coordinate_transform"),
+    ("几何属性 面积 周长 类型", "geometry_properties"),
+    ("数据验证 完整性检查", "validate_data"),
+    ("地图渲染 出图 绘制", "render_map"),
+    ("生成设计暴雨雨型 暴雨强度 历时", "design_storm"),
+    ("计算径流量 产流 SCS-CN", "runoff_compute"),
+    ("创建SWMM管网模型 子汇水", "swmm_create_model"),
+    ("运行SWMM管网模拟 排水管网", "swmm_simulate"),
+    ("模型率定校准 NSE 参数优化", "calibrate_suggest"),
+    ("渲染洪水淹没范围图 淹没面积 会不会被水淹 积水", "flood_inundation_map"),
+    ("洪水风险评估 内涝评估 积水", "flood_assessment"),
+    ("排水系统能力评估 排水评估", "drainage_assessment"),
+    ("洪水预警 水位预警 防汛", "flood_warning"),
+    ("洪水风险区域划分 风险等级", "flood_risk_zones"),
+    ("二维水动力淹没模拟 洪水演进 水深", "hydrodynamic_2d_sim"),
+    ("DEM地形分析 坡度 坡向 高程统计", "dem_analyze"),
+    ("流域划分 提取流域 子流域", "watershed_delineate"),
+    ("河网提取 水流累积 汇流 河道", "flow_accumulation"),
+    ("地形剖面 断面 高程变化", "terrain_profile"),
+    ("点位查询 高程 坐标查询", "point_query"),
+    ("DEM渲染 地形渲染", "dem_render"),
+    ("生成TIN不规则三角网 三角化", "tin_generate"),
+    ("四叉树自适应剖分 网格划分", "quadtree_subdivide"),
+    ("降雨径流关系 降雨和径流的关系 产汇流", "runoff_compute"),
+    ("被水淹没 水淹 淹水 洪涝 涝灾", "flood_inundation_map"),
+    ("区域分析 区域怎么样 区域评估 区域情况", "flood_assessment"),
+]
+
+_tfidf_vec: TfidfVectorizer | None = None
+_tfidf_matrix: np.ndarray | None = None
+_tfidf_tool_names: list[str] = []
+
+
+def _init_tfidf():
+    global _tfidf_vec, _tfidf_matrix, _tfidf_tool_names
+    if _tfidf_vec is not None:
+        return
+    _tfidf_tool_names = [t for _, t in TOOL_CORPUS]
+    corpus = [d for d, _ in TOOL_CORPUS]
+    _tfidf_vec = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4))
+    _tfidf_matrix = _tfidf_vec.fit_transform(corpus)
+
+
+def _semantic_route(query: str) -> str | None:
+    _init_tfidf()
+    if _tfidf_matrix is None:
+        return None
+    q_vec = _tfidf_vec.transform([query])
+    scores = cosine_similarity(q_vec, _tfidf_matrix)[0]
+    best_idx = int(np.argmax(scores))
+    if scores[best_idx] < 0.15:
+        return None
+    return _tfidf_tool_names[best_idx]
+
+
+async def _route(message: str, history: list[dict]) -> str:
+    if any(kw in message.lower() for kw in SIMPLE_KEYWORDS):
+        return "SIMPLE"
+
+    for pattern, tool in ROUTING_RULES:
+        if re.search(pattern, message):
+            return f"DIRECT:{tool}"
+
+    sem_hit = _semantic_route(message)
+    if sem_hit:
+        return f"DIRECT:{sem_hit}"
+
+    plan_prompt = """你是水利空间智能体的规划模块。根据用户意图选择执行模式：
+
+模式A - 仅寒暄闲聊 → 回复 "SIMPLE"
+模式B - 单工具任务 → 回复 "DIRECT: 工具名"
+模式C - 多步流水线 → 列出步骤
+
+优先选择模式B。只有明确需要多个工具协同才选模式C。
+可用工具：hydrodynamic_2d_sim, get_parameter, explain_concept, search, get_standard, dem_analyze, watershed_delineate, flow_accumulation, terrain_profile, point_query, dem_render, tin_generate, quadtree_subdivide, design_storm, runoff_compute, swmm_create_model, swmm_simulate, calibrate_suggest, flood_inundation_map, flood_assessment, drainage_assessment, flood_warning, flood_risk_zones, spatial_query, buffer, overlay, coordinate_transform, geometry_properties, validate_data, render_map"""
+    messages = [{"role": "system", "content": plan_prompt}, *history, {"role": "user", "content": message}]
     try:
-        text = text.strip()
-        # extract JSON from markdown code block
-        json_match = re.search(r'```(?:json)?\s*\n?(.*?)```', text, re.DOTALL)
-        if json_match:
-            text = json_match.group(1).strip()
-        # find raw JSON object if no code block
-        if not text.startswith('{'):
-            brace_match = re.search(r'\{[\s\S]*\}', text)
-            if brace_match:
-                text = brace_match.group(0)
-        # strip JS-style comments
-        text = re.sub(r'//.*?(?=\n|")', '', text)
-        text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
-        data = json.loads(text)
-    except (json.JSONDecodeError, IndexError):
-        return [], text
-
-    tools = []
-    reply = data.get("reply", "")
-    ui_action = data.get("ui_action", "")
-    if ui_action:
-        tools.append(("ui", "__ui_action__", {"action": ui_action}))
-    for t in data.get("tools", []):
-        server = t.get("server", "")
-        tool = t.get("tool", "")
-        args = t.get("arguments", {})
-        clean_args = {}
-        for k, v in args.items():
-            if isinstance(k, str):
-                clean_args[k] = v
-        if server and tool:
-            if tool.startswith(server + "."):
-                tool = tool[len(server) + 1:]
-            tools.append((server, tool, clean_args))
-    return tools, reply
+        content, _, _ = await asyncio.wait_for(_call_llm(messages, model=MODEL_AIR, use_tools=False), timeout=10.0)
+        return content
+    except (asyncio.TimeoutError, Exception):
+        return "SIMPLE"
 
 
-THINKING_STEPS = {
-    "knowledge": ["解析查询意图...", "识别关键实体: {entities}", "匹配参数表: {table}", "检索条件: {conditions}", "调用 mcp-knowledge.{tool}...", "解析返回数据...", "格式化输出..."],
-    "gis": ["解析空间分析需求...", "提取几何参数: {params}", "确定操作: {operation}", "调用 mcp-gis.{tool}...", "处理几何运算...", "验证结果有效性...", "空间分析完成。"],
-    "map": ["解析可视化需求...", "准备图层数据...", "配置渲染样式...", "调用 mcp-map.{tool}...", "生成图像...", "可视化完成。"],
-    "data": ["解析数据操作需求...", "检查数据源...", "调用 mcp-data.{tool}...", "处理结果..."],
-    "hydro": ["解析水文分析需求...", "确定分析方法: {operation}", "准备水文参数...", "调用 mcp-hydro.{tool}...", "计算产汇流...", "水文分析完成。"],
-    "flood": ["解析内涝分析需求...", "评估排水能力...", "调用 mcp-flood.{tool}...", "计算淹没范围...", "风险等级评定...", "内涝分析完成。"],
-    "raster": ["解析地形分析需求...", "加载DEM数据...", "调用 mcp-raster.{tool}...", "计算地形因子...", "地形分析完成。"],
-}
+def _validate_result(tool: str, args: dict, result: dict) -> tuple[bool, str]:
+    if not isinstance(result, dict):
+        return True, "ok"
+    if "error" in result:
+        return False, result["error"]
+    suspicious = [
+        (tool == "dem_analyze" and result.get("statistics", {}).get("min_elevation_m", 9999) < -100, "高程异常低于-100m"),
+        (tool == "flood_assessment" and result.get("avg_flood_depth_cm", 0) > 1000, "积水深度超过10m，不合理"),
+        (tool == "runoff_compute" and result.get("runoff_volume_m3", 0) < 0, "径流体积为负"),
+        (tool == "design_storm" and result.get("peak_intensity_mm_per_hr", 0) > 500, "暴雨强度超过500mm/h，异常"),
+    ]
+    for cond, msg in suspicious:
+        if cond:
+            return False, msg
+    return True, "ok"
+
+
+def _trim_context(messages: list[dict]) -> list[dict]:
+    total = sum(len(str(m.get("content", ""))) for m in messages)
+    if total <= MAX_CONTEXT_CHARS:
+        return messages
+    system = messages[0] if messages and messages[0].get("role") == "system" else None
+    rest = messages[1:] if system else messages
+    while rest and sum(len(str(m.get("content", ""))) for m in rest) > MAX_CONTEXT_CHARS - 500:
+        removed = False
+        for i in range(len(rest) - 1):
+            if rest[i].get("role") == "assistant" and rest[i].get("tool_calls"):
+                tool_count = 0
+                j = i + 1
+                while j < len(rest) and rest[j].get("role") == "tool":
+                    tool_count += 1
+                    j += 1
+                if tool_count > 0:
+                    rest = rest[:i] + rest[j:]
+                    removed = True
+                    break
+        if not removed:
+            for i in range(min(2, len(rest))):
+                if rest[i].get("role") not in ("tool",):
+                    rest = rest[:i] + rest[i + 1:]
+                    removed = True
+                    break
+            if not removed:
+                break
+    result = [system, *rest] if system else rest
+    cleaned = [result[0]] if result and result[0].get("role") == "system" else []
+    source = result[1:] if cleaned else result
+    for m in source:
+        if m.get("role") == "tool" and (not cleaned or cleaned[-1].get("role") != "assistant" or not cleaned[-1].get("tool_calls")):
+            continue
+        cleaned.append(m)
+    if len(cleaned) < 2 and messages:
+        return messages
+    return cleaned
+
+
+def _sweep_cache():
+    global _last_cache_sweep
+    now = time.time()
+    if now - _last_cache_sweep < 60:
+        return
+    _last_cache_sweep = now
+    expired = [k for k, (ts, _) in _tool_cache.items() if now - ts > CACHE_TTL]
+    for k in expired:
+        del _tool_cache[k]
+
+
+async def _call_mcp_tool(server: str, tool: str, args: dict, retries: int = 2) -> dict:
+    url = MCP_SERVERS.get(server, "")
+    if not url:
+        return {"error": f"Unknown server: {server}"}
+    last_err = ""
+    for attempt in range(retries + 1):
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(f"{url}/call_tool", json={"name": tool, "arguments": args})
+                resp.raise_for_status()
+                return resp.json()
+        except Exception as e:
+            last_err = str(e)[:200]
+            if attempt < retries:
+                await asyncio.sleep(0.5 * (attempt + 1))
+    return {"error": last_err}
+
+
+async def _cached_mcp_call(server: str, tool: str, args: dict) -> dict:
+    breaker_key = f"{server}.{tool}"
+    breaker_entry = _circuit_breaker.get(breaker_key)
+    if breaker_entry:
+        fail_count, last_fail_ts = breaker_entry
+        if fail_count >= BREAKER_THRESHOLD and time.time() - last_fail_ts < BREAKER_COOLDOWN:
+            return {"error": f"熔断: {tool}连续失败{BREAKER_THRESHOLD}次，{int(BREAKER_COOLDOWN - (time.time() - last_fail_ts))}秒后重试"}
+        if fail_count >= BREAKER_THRESHOLD:
+            del _circuit_breaker[breaker_key]
+
+    key = hashlib.md5(f"{server}.{tool}:{json.dumps(args, sort_keys=True, ensure_ascii=False)}".encode()).hexdigest()
+    if key in _tool_cache:
+        ts, cached = _tool_cache[key]
+        if time.time() - ts < CACHE_TTL:
+            _tool_cache.move_to_end(key)
+            return cached
+        del _tool_cache[key]
+
+    result = await _call_mcp_tool(server, tool, args)
+
+    if isinstance(result, dict) and "error" in result:
+        prev = _circuit_breaker.get(breaker_key, (0, 0.0))
+        _circuit_breaker[breaker_key] = (prev[0] + 1, time.time())
+    else:
+        _circuit_breaker.pop(breaker_key, None)
+
+    _tool_cache[key] = (time.time(), result)
+    while len(_tool_cache) > CACHE_MAX:
+        _tool_cache.popitem(last=False)
+    _sweep_cache()
+    return result
+
 
 app = FastAPI(title="S-AI Web API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -221,7 +466,7 @@ async def index():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "service": "web", "tools": 0}
+    return {"status": "healthy", "service": "web", "engine": "react-fc-v2", "tools": len(GLM_TOOLS)}
 
 
 @app.get("/api/servers")
@@ -245,7 +490,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 async def upload_file(file: UploadFile = FastAPIFile(...)):
     ext = Path(file.filename).suffix.lower()
     if ext not in (".geojson", ".json", ".shp", ".zip", ".gpkg", ".kml", ".csv"):
-        return {"error": f"Unsupported format: {ext}. Accepted: .geojson, .json, .shp, .zip, .gpkg, .kml, .csv"}
+        return {"error": f"Unsupported format: {ext}"}
     dest = UPLOAD_DIR / file.filename
     content = await file.read()
     dest.write_bytes(content)
@@ -254,20 +499,11 @@ async def upload_file(file: UploadFile = FastAPIFile(...)):
         try:
             data = json.loads(content)
             if data.get("type") == "FeatureCollection":
-                n = len(data.get("features", []))
                 info["format"] = "GeoJSON"
-                info["features"] = n
-                if n > 0:
-                    geom_types = set()
-                    for f in data["features"][:50]:
-                        g = f.get("geometry", {})
-                        if g.get("type"):
-                            geom_types.add(g["type"])
-                    info["geometry_types"] = sorted(geom_types)
+                info["features"] = len(data.get("features", []))
             elif data.get("type") in ("Point", "LineString", "Polygon", "MultiPoint", "MultiLineString", "MultiPolygon"):
                 info["format"] = "GeoJSON"
                 info["features"] = 1
-                info["geometry_types"] = [data["type"]]
         except json.JSONDecodeError:
             pass
     return info
@@ -281,16 +517,6 @@ async def list_uploads():
             stat = f.stat()
             files.append({"filename": f.name, "size_bytes": stat.st_size, "modified": stat.st_mtime})
     return {"files": files, "upload_dir": str(UPLOAD_DIR)}
-
-
-def _sse(data: dict) -> str:
-    return f"data: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
-
-
-def _extract_entities(msg: str) -> str:
-    kw_map = {"糙率": "曼宁糙率", "manning": "曼宁糙率", "HDPE": "管材HDPE", "暴雨": "设计暴雨", "重现期": "重现期P", "CN": "SCS-CN", "曲线": "SCS-CN", "缓冲": "缓冲分析", "叠加": "叠加分析", "交集": "几何交集", "面积": "几何属性", "地图": "地图渲染", "验证": "数据验证", "质量": "数据质量"}
-    found = [v for k, v in kw_map.items() if k in msg.lower()]
-    return ", ".join(found[:5]) or "通用查询"
 
 
 @app.get("/api/heightmap")
@@ -311,150 +537,185 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
         if history:
             try:
                 parsed_history = json.loads(history)
-            except (json.JSONError, TypeError):
+            except (json.JSONDecodeError, TypeError):
                 pass
 
-        wf_names = []
-        if workflows:
+        ui_force = _detect_ui_action(message)
+        if ui_force:
+            yield _sse({"type": "thinking_start", "agent": "react", "label": "🧠 自主推理"})
+            yield _sse({"type": "thinking", "agent": "react", "content": f"检测到UI意图: {ui_force}"})
+            yield _sse({"type": "thinking_end", "agent": "react"})
+            yield _sse({"type": "ui_action", "action": ui_force, "args": {"action": ui_force}})
+            labels = {"open_3d": "🛰️ 已为您打开三维地形查看器", "open_tin": "🔺 已生成TIN三角网", "open_quadtree": "🌳 已生成四叉树剖分"}
+            async for ch in _stream_words(labels.get(ui_force, f"UI: {ui_force}")):
+                yield _sse({"type": "text", "content": ch})
+            yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": 0})
+            return
+
+        yield _sse({"type": "thinking_start", "agent": "planner", "label": "📋 任务规划"})
+        plan = await _route(message, parsed_history)
+        plan_upper = plan.strip().upper()
+        is_simple = plan_upper.startswith("SIMPLE")
+        is_direct = plan_upper.startswith("DIRECT:")
+        direct_tool = plan.split(":", 1)[1].strip() if is_direct else ""
+        if is_simple:
+            yield _sse({"type": "thinking", "agent": "planner", "content": "简单查询，直接执行"})
+        elif is_direct:
+            yield _sse({"type": "thinking", "agent": "planner", "content": f"直接调用: {direct_tool}"})
+        else:
+            yield _sse({"type": "thinking", "agent": "planner", "content": f"📋 执行计划:\n{plan[:300]}"})
+        yield _sse({"type": "thinking_end", "agent": "planner"})
+
+        react_messages: list[dict] = [
+            {"role": "system", "content": REACT_SYSTEM_PROMPT},
+            *parsed_history,
+            {"role": "user", "content": message},
+        ]
+        if is_direct:
+            react_messages.append({"role": "assistant", "content": f"好的，直接调用 {direct_tool} 工具。"})
+        elif not is_simple:
+            plan_header = f"""已制定执行计划，你必须严格按顺序逐步执行全部步骤。不要跳过任何步骤，不要提前结束。
+
+执行计划：
+{plan[:800]}
+
+规则：
+1. 每步只调1-2个工具
+2. 当前步骤的工具返回结果后，立即调下一步的工具
+3. 不要重复调用已返回结果的工具
+4. 全部步骤执行完毕后再总结回复
+5. 即使某步结果不完美，也要继续执行下一步"""
+            react_messages.append({"role": "assistant", "content": plan_header})
+            react_messages.append({"role": "user", "content": "现在开始执行第1步。"})
+
+        react_max = 3 if is_direct else MAX_REACT_STEPS
+        executed: set[str] = set()
+        total_tools = 0
+
+        yield _sse({"type": "thinking_start", "agent": "react", "label": "🧠 自主推理"})
+
+        for step in range(1, react_max + 1):
+            yield _sse({"type": "thinking", "agent": "react", "content": f"━━━ 推理步骤 {step}/{react_max} ━━━"})
+
             try:
-                wf_names = json.loads(workflows)
-            except (json.JSONError, TypeError):
-                pass
-
-        dynamic_prompt = SYSTEM_PROMPT
-        if wf_names:
-            dynamic_prompt += f"\n\n用户已保存的自定义编排方案：{', '.join(wf_names)}。如果用户提到执行/运行/调用这些方案名，回复中必须包含【执行流程：方案名】标记。"
-
-        # === Phase 1: Router Thinking ===
-        yield _sse({"type": "thinking_start", "agent": "router", "label": "Router 总指挥"})
-        for step in ["接收用户指令...", f"原始输入: \"{message}\""]:
-            yield _sse({"type": "thinking", "agent": "router", "content": step})
-            await asyncio.sleep(0.15)
-
-        matched: list[tuple[str, str, dict]] = []
-        llm_reply = ""
-        entities = _extract_entities(message)
-
-        # LLM routing (primary)
-        if ZHIPUAI_API_KEY:
-            yield _sse({"type": "thinking", "agent": "router", "content": "调用 GLM-5.1 意图识别..."})
-            try:
-                llm_response, llm_reasoning = await _call_llm([
-                    {"role": "system", "content": dynamic_prompt},
-                    *parsed_history,
-                    {"role": "user", "content": message},
-                ])
-                if llm_reasoning:
-                    summary = llm_reasoning.replace("\n", " ").strip()[:150]
-                    yield _sse({"type": "thinking", "agent": "router", "content": f"💭 {summary}..."})
-                matched, llm_reply = _parse_llm_response(llm_response)
-                if matched:
-                    yield _sse({"type": "thinking", "agent": "router", "content": f"GLM 选择 {len(matched)} 个工具: {', '.join(f'{s}.{t}' for s,t,_ in matched)}"})
-                elif llm_reply:
-                    yield _sse({"type": "thinking", "agent": "router", "content": "GLM 直接回复"})
-
-                ui_force = _detect_ui_action(message)
-                if ui_force:
-                    matched = [("ui", "__ui_action__", {"action": ui_force})]
-                    llm_reply = ""
-                    yield _sse({"type": "thinking", "agent": "router", "content": f"检测到UI意图，强制路由: {ui_force}"})
-                elif matched and any(t in ("dem_analyze", "dem_render") for _, t, _ in matched):
-                    for kw in ("三维", "3D", "立体", "heightmap", "立体场景", "三维场景", "立体地形", "三维地形"):
-                        if kw in message and not any(k in message for k in ("坡度", "坡向", "分析", "高程统计", "stats", "统计")):
-                            matched = [("ui", "__ui_action__", {"action": "open_3d"})]
-                            llm_reply = ""
-                            yield _sse({"type": "thinking", "agent": "router", "content": f"含'{kw}'且非分析意图 → 强制3D视图"})
-                            break
-                if matched and any(t == "hydrodynamic_2d_sim" for _, t, _ in matched):
-                    matched = [(s, t, a) for s, t, a in matched if s != "hydro"]
+                content, reasoning, tool_calls = await _call_llm(react_messages, model=MODEL_FLASH)
             except Exception as e:
-                yield _sse({"type": "thinking", "agent": "router", "content": f"GLM 失败: {str(e)[:60]}，回退关键词"})
+                yield _sse({"type": "thinking", "agent": "react", "content": f"❌ LLM失败: {str(e)[:80]}"})
+                break
 
-        # Keyword fallback (also when LLM returned reply without tools)
-        if not matched:
-            kw_matched = _keyword_fallback(message)
-            if kw_matched:
-                matched = kw_matched
-                yield _sse({"type": "thinking", "agent": "router", "content": f"关键词匹配: {', '.join(f'{s}.{t}' for s,t,_ in matched)}"})
+            if reasoning:
+                yield _sse({"type": "thinking", "agent": "react", "content": f"💭 {reasoning.replace(chr(10), ' ').strip()[:120]}..."})
 
-        if not matched and not llm_reply:
-            yield _sse({"type": "thinking", "agent": "router", "content": "未匹配具体工具 → 通用回复"})
-            yield _sse({"type": "thinking_end", "agent": "router"})
-            async for ch in _stream_words("水利空间智能体已就绪\n\n我是S-AI，融合水利工程师与空间分析师的专业智能体平台。接入8个专项智能体、42个专业工具，基于甘肃迭部0.5m高精度DEM真实地形数据。\n\n🔹 地形与空间分析\n  · \"分析坡度坡向\" → DEM地形分析\n  · \"提取流域河网\" → 汇流累积+流域 delineation\n  · \"地形剖面\" → 点击地图生成剖面图\n  · \"点查询\" → 地图上任意点的高程/坡度/坡向/曲率/TPI\n\n🔹 二维水动力模拟\n  · \"进行水动力模拟\" → 自动定位有效DEM区域，LISFLOOD-FP扩散波求解，3D场景动画播放\n  · \"模拟24小时洪水演进\" → Chicago雨型驱动，时间轴逐帧渲染\n  · \"精细三角网\" → 20m间距TIN三角网三维可视化\n  · \"四叉树自适应剖分\" → 地形复杂度自适应网格\n\n🔹 水利工程计算\n  · \"设计暴雨\" → 暴雨强度公式+雨型生成\n  · \"SCS-CN径流\" → 产汇流计算\n  · \"SWMM建模\" → 排水管网模型+模拟\n  · \"排水校核\" → Manning公式管道过流能力\n  · \"洪水预警\" → 实时风险评分+预警等级\n\n🔹 智能交互\n  · 点击地图 → 自动返回完整空间属性\n  · 拖拽工作流 → 自定义编排，自然语言调用\n  · 3D地形查看 → 水位控制+TIN叠加\n\n请描述您的分析需求，或直接点击地图开始。"):
-                yield _sse({"type": "text", "content": ch})
-            yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000)})
-            return
-
-        if not matched and llm_reply:
-            yield _sse({"type": "thinking_end", "agent": "router"})
-            async for ch in _stream_words(llm_reply):
-                yield _sse({"type": "text", "content": ch})
-            yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000)})
-            return
-
-        agents = ", ".join(sorted({s for s, _, _ in matched}))
-        yield _sse({"type": "thinking", "agent": "router", "content": f"匹配 {len(matched)} 个工具 → Agent: [{agents}]"})
-        yield _sse({"type": "thinking", "agent": "router", "content": f"执行链: {' → '.join(f'{s}.{t}' for s, t, _ in matched)}"})
-        yield _sse({"type": "thinking_end", "agent": "router"})
-
-        yield _sse({"type": "divider", "content": f"⚡ 调度 {len(matched)} 个工具"})
-
-        # === Phase 2: Execute each tool with thinking ===
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            for i, (server, tool_name, args) in enumerate(matched):
-                if tool_name == "__ui_action__":
-                    action = args.get("action", "")
-                    yield _sse({"type": "ui_action", "action": action, "args": args})
-                    action_label = {
-                        "open_3d": "🛰️ 已为您打开三维地形查看器",
-                        "open_tin": "🔺 已生成TIN三角网叠加到地图",
-                        "open_quadtree": "🌳 已生成四叉树自适应剖分叠加到地图",
-                    }.get(action, f"UI操作: {action}")
-                    yield _sse({"type": "text", "content": action_label})
+            if content and not tool_calls:
+                is_multi_step = not is_simple and not is_direct
+                if is_multi_step and total_tools < len([l for l in plan.split('\n') if l.strip() and l.strip()[0].isdigit()]):
+                    react_messages.append({"role": "user", "content": "计划未完成，请继续调用下一个工具。不要回复文字，只调工具。"})
+                    yield _sse({"type": "thinking", "agent": "react", "content": "⏩ 计划未完成，强制继续..."})
                     continue
+                yield _sse({"type": "thinking", "agent": "react", "content": f"✅ 推理完成，共{step}步，调用{total_tools}个工具"})
+                yield _sse({"type": "thinking_end", "agent": "react"})
+                async for ch in _stream_words(content):
+                    yield _sse({"type": "text", "content": ch})
+                yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": step, "tools_called": total_tools})
+                return
 
-                label = {"gis": "GIS 空间分析专家", "knowledge": "Knowledge 知识管家", "data": "Data 数据工程师", "map": "Map 可视化专家", "hydro": "Hydro 水文建模师", "flood": "Flood 内涝分析师", "raster": "Raster 地形分析专家"}.get(server, server)
+            if not tool_calls:
+                yield _sse({"type": "thinking_end", "agent": "react"})
+                async for ch in _stream_words("抱歉，我暂时无法处理您的请求。请描述具体的水利分析需求。"):
+                    yield _sse({"type": "text", "content": ch})
+                yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": step, "tools_called": total_tools})
+                return
 
-                yield _sse({"type": "thinking_start", "agent": server, "label": label})
-
-                steps = THINKING_STEPS.get(server, ["处理中..."])
-                step_vars = {"entities": entities, "table": tool_name, "conditions": json.dumps(args.get("conditions", {}), ensure_ascii=False), "params": json.dumps({k: v for k, v in args.items() if k != "geometry"}, ensure_ascii=False), "operation": tool_name, "tool": tool_name}
-
-                for j, step in enumerate(steps):
-                    try:
-                        formatted = step.format(**{k: v for k, v in step_vars.items() if f"{{{k}}}" in step})
-                    except (KeyError, IndexError):
-                        formatted = step
-                    yield _sse({"type": "thinking", "agent": server, "content": formatted})
-                    await asyncio.sleep(0.1 + (0.06 if j < 3 else 0.04))
-
-                yield _sse({"type": "tool_start", "server": server, "tool": tool_name, "step": i + 1, "total": len(matched)})
-
-                url = MCP_SERVERS.get(server, "")
+            assistant_msg: dict[str, Any] = {"role": "assistant", "content": content}
+            safe_tool_calls = []
+            for tc in tool_calls:
                 try:
-                    t0 = time.time()
-                    resp = await client.post(f"{url}/call_tool", json={"name": tool_name, "arguments": args})
-                    ms = int((time.time() - t0) * 1000)
-                    result = resp.json()
+                    tc_id = tc.get("id", f"tc_{step}_{len(safe_tool_calls)}")
+                    fn = tc.get("function", {})
+                    name = fn.get("name", "")
+                    arguments = fn.get("arguments", "{}")
+                    if not name:
+                        continue
+                    safe_tool_calls.append({"id": tc_id, "type": "function", "function": {"name": name, "arguments": arguments}})
+                except (AttributeError, TypeError):
+                    continue
+            if not safe_tool_calls:
+                yield _sse({"type": "thinking_end", "agent": "react"})
+                async for ch in _stream_words("抱歉，工具调用格式异常。请重新描述您的需求。"):
+                    yield _sse({"type": "text", "content": ch})
+                yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": step, "tools_called": total_tools})
+                return
+            assistant_msg["tool_calls"] = safe_tool_calls
+            react_messages.append(assistant_msg)
 
-                    yield _sse({"type": "thinking", "agent": server, "content": f"✅ {tool_name} 返回成功 ({ms}ms)"})
-                    yield _sse({"type": "tool_result", "server": server, "tool": tool_name, "result": result, "elapsed_ms": ms})
-                    yield _sse({"type": "thinking_end", "agent": server})
+            deduped_calls = []
+            for tc in safe_tool_calls:
+                tool_name = tc["function"]["name"]
+                try:
+                    args = json.loads(tc["function"]["arguments"])
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+                if not isinstance(args, dict):
+                    args = {}
+                args_key = hashlib.md5(json.dumps(args, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+                dedup = f"{tool_name}:{args_key}"
+                if dedup in executed:
+                    yield _sse({"type": "thinking", "agent": "react", "content": f"⏭️ 跳过重复: {tool_name}"})
+                    cache_lookup = hashlib.md5(f"{TOOL_TO_SERVER.get(tool_name, '')}.{tool_name}:{json.dumps(args, sort_keys=True, ensure_ascii=False)}".encode()).hexdigest()
+                    cached_entry = _tool_cache.get(cache_lookup)
+                    cached_summary = ""
+                    if cached_entry:
+                        _, cached_val = cached_entry
+                        if isinstance(cached_val, dict):
+                            cached_summary = _compress_result(tool_name, cached_val)
+                    react_messages.append({"role": "tool", "tool_call_id": tc["id"], "content": cached_summary or "该工具已执行过，结果已在上方。请继续执行下一步。"})
+                    continue
+                executed.add(dedup)
+                deduped_calls.append((tc["id"], tool_name, args))
 
-                    summary = _format_tool_summary(server, tool_name, result)
-                    async for ch in _stream_words(summary):
-                        yield _sse({"type": "text", "content": ch})
+            tasks = [(tc_id, tool_name, TOOL_TO_SERVER.get(tool_name, ""), args) for tc_id, tool_name, args in deduped_calls]
+            results = await asyncio.gather(*[_cached_mcp_call(s, n, a) for _, n, s, a in tasks], return_exceptions=True)
 
-                except Exception as e:
-                    yield _sse({"type": "thinking", "agent": server, "content": f"❌ 失败: {e}"})
-                    yield _sse({"type": "thinking_end", "agent": server})
-                    yield _sse({"type": "tool_error", "server": server, "tool": tool_name, "error": str(e)})
+            for i, ((tc_id, tool_name, server, args), result) in enumerate(zip(tasks, results)):
+                if isinstance(result, Exception):
+                    result = {"error": str(result)[:200]}
 
-        total_ms = int((time.time() - t_start) * 1000)
-        yield _sse({"type": "event", "agent": "router", "action": "complete", "detail": f"{len(matched)} tools, {total_ms}ms"})
-        async for ch in _stream_words(f"\n✅ 全部完成。耗时 {total_ms}ms"):
-            yield _sse({"type": "text", "content": ch})
-        yield _sse({"type": "done", "duration_ms": total_ms, "tools_called": len(matched)})
+                total_tools += 1
+                label = AGENT_LABELS.get(server, server)
+
+                valid, validation_msg = _validate_result(tool_name, args, result if isinstance(result, dict) else {})
+                if not valid:
+                    yield _sse({"type": "thinking", "agent": "reflect", "content": f"🔍 反思: {tool_name}结果异常 — {validation_msg}"})
+                    yield _sse({"type": "tool_error", "server": server, "tool": tool_name, "error": validation_msg})
+                    result = {"error": f"验证失败: {validation_msg}", "original_keys": list(result.keys()) if isinstance(result, dict) else []}
+
+                yield _sse({"type": "divider", "content": f"⚡ Step {step}: {label} → {tool_name}"})
+                yield _sse({"type": "tool_start", "server": server, "tool": tool_name, "step": total_tools, "react_step": step})
+                yield _sse({"type": "tool_result", "server": server, "tool": tool_name, "result": result, "elapsed_ms": 0})
+
+                summary = _format_tool_summary(server, tool_name, result)
+                async for ch in _stream_words(summary):
+                    yield _sse({"type": "text", "content": ch})
+
+                compressed = _compress_result(tool_name, result) if isinstance(result, dict) else str(result)[:200]
+                if not is_simple and not is_direct and plan:
+                    compressed += f"\n\n[已完成{total_tools}个工具。请继续执行计划中的下一步工具调用，不要回复文字。]"
+                react_messages.append({"role": "tool", "tool_call_id": tc_id, "content": compressed})
+
+            react_messages = _trim_context(react_messages)
+            yield _sse({"type": "thinking", "agent": "react", "content": f"📊 已获取{len(deduped_calls)}个工具结果，继续推理..."})
+
+        yield _sse({"type": "thinking", "agent": "react", "content": f"⚠️ 已达最大推理步数({react_max})，总结回复"})
+        yield _sse({"type": "thinking_end", "agent": "react"})
+        try:
+            final_content, _, _ = await _call_llm(react_messages, model=MODEL_AIR, use_tools=False)
+            async for ch in _stream_words(final_content):
+                yield _sse({"type": "text", "content": ch})
+        except Exception:
+            async for ch in _stream_words("分析完成。如需更详细结果，请提出更具体的问题。"):
+                yield _sse({"type": "text", "content": ch})
+
+        yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": react_max, "tools_called": total_tools})
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -465,15 +726,11 @@ async def _stream_words(text: str, chunk_size: int = 3):
         await asyncio.sleep(0.02)
 
 
-async def _stream_simulate_text(text: str, gen_fn):
-    pass
-
-
 def _format_tool_summary(server: str, tool: str, result: dict | list) -> str:
     if isinstance(result, list):
         result = result[0] if result else {}
     if not isinstance(result, dict):
-        return str(result)
+        return str(result)[:200]
 
     if tool == "get_parameter":
         entries = result.get("results", [])
@@ -483,7 +740,7 @@ def _format_tool_summary(server: str, tool: str, result: dict | list) -> str:
         for e in entries[:8]:
             name = e.get("surface", e.get("city", e.get("land_use", "")))
             cond = e.get("condition", e.get("hydrologic_group", ""))
-            if tool == "get_parameter" and "n_typical" in e:
+            if "n_typical" in e:
                 lines.append(f"  • {name} ({cond}): n = {e['n_typical']} [{e.get('n_min','')}, {e.get('n_max','')}]\n")
             elif "A1" in e:
                 lines.append(f"  • {name}: q=167×{e['A1']}×(1+{e.get('C','')}×lgP)/({e.get('b','')})^{e.get('n','')}\n")
@@ -492,250 +749,55 @@ def _format_tool_summary(server: str, tool: str, result: dict | list) -> str:
             else:
                 lines.append(f"  • {json.dumps(e, ensure_ascii=False)[:100]}\n")
         return "".join(lines)
-
     if tool == "spatial_query":
         return f"🔍 空间查询: relation={result.get('relation')}, result={result.get('result')}\n"
-
     if tool == "buffer":
-        gt = result.get("geometry", {}).get("type", "unknown")
-        return f"⭕ 缓冲区生成完成: {gt}\n"
-
+        return f"⭕ 缓冲区: {result.get('geometry', {}).get('type', 'unknown')}\n"
     if tool == "overlay":
-        gt = result.get("geometry", {}).get("type", "unknown")
-        return f"📐 叠加分析完成: {result.get('operation', '')} → {gt}\n"
-
+        return f"📐 叠加: {result.get('operation', '')} → {result.get('geometry', {}).get('type', 'unknown')}\n"
     if tool == "geometry_properties":
-        return f"📏 几何属性: type={result.get('geometry_type')}, valid={result.get('is_valid')}, bounds={result.get('bounds')}\n"
-
+        return f"📏 几何: type={result.get('geometry_type')}, valid={result.get('is_valid')}\n"
     if tool == "validate_data":
-        return f"✅ 数据验证: valid={result.get('is_valid')}, issues={result.get('issues_found')}\n"
-
+        return f"✅ 验证: valid={result.get('is_valid')}, issues={result.get('issues_found')}\n"
     if tool == "render_map":
-        img_len = len(result.get("image_base64", ""))
-        return f"🗺️ 地图渲染完成: ~{img_len * 3 // 4 // 1024}KB PNG\n"
-
+        return f"🗺️ 渲染完成: ~{len(result.get('image_base64', '')) * 3 // 4 // 1024}KB PNG\n"
     if tool == "design_storm":
-        return f"🌧️ 设计暴雨: {result.get('city','')} P={result.get('return_period_years','')}年 历时{result.get('duration_minutes','')}min 峰值{result.get('peak_intensity_mm_per_hr','')}mm/h 总量{result.get('total_depth_mm','')}mm\n"
-
+        return f"🌧️ 暴雨: {result.get('city','')} P={result.get('return_period_years','')}年 峰值{result.get('peak_intensity_mm_per_hr','')}mm/h\n"
     if tool == "runoff_compute":
-        return f"💧 SCS-CN径流: 降雨{result.get('rainfall_mm','')}mm CN={result.get('curve_number','')} → 径流{result.get('runoff_depth_mm','')}mm 体积{result.get('runoff_volume_m3','')}m³\n"
-
+        return f"💧 径流: 降雨{result.get('rainfall_mm','')}mm → 径流{result.get('runoff_depth_mm','')}mm\n"
     if tool == "swmm_create_model":
-        return f"🏗️ SWMM模型创建: {result.get('project_name','')} {result.get('n_subcatchments','')}子汇水 {result.get('n_conduits','')}管道\n"
-
+        return f"🏗️ SWMM: {result.get('n_subcatchments','')}子汇水\n"
     if tool == "swmm_simulate":
-        overflow = result.get('overflow_nodes', [])
-        flood_info = f" 溢流节点:{','.join(overflow)}" if overflow else ""
-        return f"🔬 SWMM模拟: 峰值流量{result.get('peak_flow_cms','')}cms 最大水深{result.get('max_depth_m','')}m 溢流{result.get('flooding_pct','')}%{flood_info}\n"
-
+        return f"🔬 SWMM: 峰值{result.get('peak_flow_cms','')}cms 水深{result.get('max_depth_m','')}m\n"
     if tool == "flood_assessment":
-        return f"🌊 内涝评估: 风险等级[{result.get('risk_level','').upper()}] 平均积水{result.get('avg_flood_depth_cm','')}cm 溢流{result.get('overflow_volume_m3','')}m³\n"
-
+        return f"🌊 内涝: [{result.get('risk_level','').upper()}] 积水{result.get('avg_flood_depth_cm','')}cm\n"
     if tool == "flood_inundation_map":
-        return f"🗺️ 淹没范围图: {len(result.get('rings',[]))}级淹没环 总面积{result.get('total_flood_area_m2','')}m²\n"
-
+        return f"🗺️ 淹没: {len(result.get('rings',[]))}级 面积{result.get('total_flood_area_m2','')}m²\n"
     if tool == "drainage_assessment":
-        status = "✅达标" if result.get('status') == 'adequate' else f"⚠️不足 缺口{result.get('deficit_cms','')}cms"
-        return f"🔧 排水能力: 满管流量{result.get('full_flow_capacity_cms','')}cms {status}\n"
-
+        st = "✅达标" if result.get('status') == 'adequate' else f"⚠️不足 缺口{result.get('deficit_cms','')}cms"
+        return f"🔧 排水: 满管{result.get('full_flow_capacity_cms','')}cms {st}\n"
     if tool == "flood_warning":
-        return f"⚠️ 预警: {result.get('warning_level','').upper()}级 风险分{result.get('risk_score','')} → {', '.join(result.get('recommended_actions',[]))}\n"
-
+        return f"⚠️ 预警: {result.get('warning_level','').upper()}级 → {', '.join(result.get('recommended_actions',[]))}\n"
     if tool == "flood_risk_zones":
-        zones = result.get('zones', [])
-        return f"🎯 风险分区: {len(zones)}个区域 人口风险{result.get('total_population_at_risk','')}人\n"
-
+        return f"🎯 风险分区: {len(result.get('zones',[]))}个区域\n"
     if tool == "hydrodynamic_2d_sim":
-        frames = result.get('frames', [])
-        peak = result.get('peak_max_depth_m', '?')
-        grid = result.get('grid_size', '?')
-        last = frames[-1] if frames else {}
-        return f"🌊 2D水动力模拟完成: {len(frames)}帧 | 网格{grid} | 峰值水深{peak}m | 末帧{last.get('flooded_cells',0)}cells\n"
-
+        return f"🌊 2D模拟: {len(result.get('frames',[]))}帧 峰值水深{result.get('peak_max_depth_m','?')}m\n"
     if tool == "dem_analyze":
-        slope = result.get('slope', {})
-        return f"⛰️ 地形分析: 坡度均值{slope.get('mean_deg','')}° 优势坡向{result.get('aspect',{}).get('dominant','')} 汇流方向{result.get('flow_direction',{}).get('dominant','')}\n"
-
+        s = result.get('slope', {})
+        return f"⛰️ 地形: 坡度{s.get('mean_deg','')}° 坡向{result.get('aspect',{}).get('dominant','')}\n"
     if tool == "watershed_delineate":
-        return f"🏞️ 流域提取: 面积{result.get('watershed_area_km2','')}km² 河网密度{result.get('drainage_density','')}km/km²\n"
-
+        return f"🏞️ 流域: {result.get('watershed_area_km2','')}km²\n"
     if tool == "flow_accumulation":
-        return f"🌊 汇流累积: {result.get('n_streams','')}条河流 总长{result.get('total_stream_length_km','')}km\n"
-
+        return f"🌊 河网: {result.get('n_streams','')}条 总长{result.get('total_stream_length_km','')}km\n"
     if tool == "terrain_profile":
-        return f"📈 地形剖面: 长{result.get('total_distance_m','')}m 高差{round(result.get('max_elevation_m',0)-result.get('min_elevation_m',0),1)}m\n"
-
+        return f"📈 剖面: 长{result.get('total_distance_m','')}m\n"
+    if tool == "point_query":
+        return f"📍 点位: 高程{result.get('elevation_m','?')}m 坡度{result.get('slope_deg','?')}°\n"
     if tool == "calibrate_suggest":
-        return f"🔧 率定建议: NSE={result.get('nash_sutcliffe','')}({result.get('nse_rating','')}) 峰值误差{result.get('error_pct','')}% → {len(result.get('suggestions',[]))}条建议\n"
-
+        return f"🔧 率定: NSE={result.get('nash_sutcliffe','')} → {len(result.get('suggestions',[]))}条建议\n"
     if "error" in result:
         return f"❌ 错误: {result['error']}\n"
-
     return f"⚙️ {server}.{tool}: {json.dumps(result, ensure_ascii=False)[:200]}\n"
-
-
-def _pick_knowledge_tool(msg: str) -> tuple[str, dict]:
-    if "糙率" in msg or "manning" in msg.lower():
-        surface = "混凝土管道"
-        for kw, val in [("HDPE","HDPE"),("hdpe","HDPE"),("塑料","HDPE"),("砖","砖砌"),("河道","天然河道"),("沥青","沥青")]:
-            if kw in msg: surface = val
-        return "get_parameter", {"parameter_name": "manning_n", "conditions": {"surface": surface}}
-    if "暴雨" in msg or "重现期" in msg or "公式" in msg:
-        city = "北京"
-        for c in ["上海","广州","深圳","成都","武汉","南京","杭州","重庆","天津"]:
-            if c in msg: city = c
-        return "get_parameter", {"parameter_name": "design_storm", "conditions": {"city": city}}
-    if "CN" in msg or "曲线" in msg or "产流" in msg:
-        return "get_parameter", {"parameter_name": "scs_cn", "conditions": {}}
-    return "search", {"query": msg}
-
-
-def _pick_gis_tool(msg: str) -> tuple[str, dict]:
-    if "导入" in msg or "上传" in msg or "管网" in msg and "数据" in msg:
-        import re
-        m = re.search(r'[\w-]+\.(geojson|json|shp|gpkg|kml)', msg, re.IGNORECASE)
-        fname = m.group(0) if m else ""
-        return "import_network", {"file_name": fname}
-    if "缓冲" in msg:
-        return "buffer", {"geometry": {"type": "Point", "coordinates": [116.397, 39.908]}, "distance": 0.05}
-    if "叠加" in msg or "交集" in msg:
-        return "overlay", {"geometry_a": {"type": "Polygon", "coordinates": [[[0,0],[2,0],[2,2],[0,2],[0,0]]]}, "geometry_b": {"type": "Polygon", "coordinates": [[[1,0],[3,0],[3,2],[1,2],[1,0]]]}, "operation": "intersection"}
-    if "属性" in msg or "面积" in msg:
-        return "geometry_properties", {"geometry": {"type": "Polygon", "coordinates": [[[116.3,39.9],[116.4,39.9],[116.4,40.0],[116.3,40.0],[116.3,39.9]]]}}
-    return "spatial_query", {"geometry_a": {"type": "Polygon", "coordinates": [[[116.2,39.7],[116.6,39.7],[116.6,40.1],[116.2,40.1],[116.2,39.7]]]}, "geometry_b": {"type": "Point", "coordinates": [116.397, 39.908]}, "relation": "contains"}
-
-
-def _pick_data_tool(msg: str) -> tuple[str, dict]:
-    return "list_tables", {}
-
-
-def _pick_map_tool(msg: str) -> tuple[str, dict]:
-    return "render_map", {"layers": [{"data": {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[116.3,39.9],[116.4,39.9],[116.4,40.0],[116.3,40.0],[116.3,39.9]]]}, "properties": {}}]}, "style": {"color": "#00d4ff", "alpha": 0.3}}], "title": "S-AI Analysis"}
-
-
-def _pick_hydro_tool(msg: str) -> tuple[str, dict]:
-    if "雨型" in msg or "暴雨强度" in msg or "设计暴雨" in msg:
-        city = "beijing"
-        for c, e in [("北京","beijing"),("上海","shanghai"),("深圳","shenzhen"),("广州","guangzhou"),("成都","chengdu")]:
-            if c in msg: city = e
-        return "design_storm", {"city": city, "return_period": 50, "duration_minutes": 120}
-    if "径流" in msg or "产流" in msg or "SCS" in msg or "CN" in msg:
-        return "runoff_compute", {"rainfall_mm": 80, "curve_number": 75, "drainage_area_ha": 10}
-    if "swmm" in msg.lower() or "SWMM" in msg or "模型" in msg:
-        return "swmm_create_model", {"project_name": "sai_demo", "area_hectares": 10, "impervious_percent": 60}
-    if "模拟" in msg or "仿真" in msg:
-        return "swmm_simulate", {"rainfall_mm_hr": 80, "duration_min": 120}
-    if "洪峰" in msg or "调参" in msg or "率定" in msg or "校准" in msg:
-        return "calibrate_suggest", {"observed_peak_flow": 1.5, "simulated_peak_flow": 2.0, "nash_sutcliffe": 0.65}
-    return "runoff_compute", {"rainfall_mm": 80, "curve_number": 75, "drainage_area_ha": 10}
-
-
-def _pick_flood_tool(msg: str) -> tuple[str, dict]:
-    if "预警" in msg:
-        return "flood_warning", {"current_rainfall_mm_hr": 60, "forecast_rainfall_mm_hr": 80, "soil_saturation_pct": 70, "drainage_utilization_pct": 85}
-    if "排水" in msg or "管网" in msg or "管径" in msg:
-        return "drainage_assessment", {"pipe_diameter_m": 0.8, "pipe_slope": 0.003, "design_flow_cms": 1.5}
-    if "风险区" in msg:
-        return "flood_risk_zones", {}
-    hydro2d_kw = ("水动力", "二维模拟", "演进", "淹没过程", "淹没演进", "洪水演进", "动态模拟", "洪泛", "水动力模拟")
-    if any(k in msg for k in hydro2d_kw):
-        import re
-        hours = 24
-        m = re.search(r'(\d+)\s*小时', msg)
-        if m:
-            hours = int(m.group(1))
-        rm = re.search(r'(\d+)\s*mm', msg)
-        rain_mm = float(rm.group(1)) if rm else 120.0
-        return "hydrodynamic_2d_sim", {"duration_hr": hours, "output_steps": 12, "rain_pattern": "chicago", "rainfall_mm": rain_mm}
-    import re
-    m = re.search(r'水位\s*(\d+\.?\d*)', msg)
-    wl = float(m.group(1)) if m else None
-    inundation_args = {"radius_m": 2000, "max_depth_m": 2.0}
-    if wl:
-        inundation_args["water_level_m"] = wl
-    return "flood_inundation_map", inundation_args
-
-
-def _pick_raster_tool(msg: str) -> tuple[str, dict]:
-    if any(k in msg for k in ["三角网", "TIN", "不规则三角"]):
-        return "__ui_action__", {"action": "open_tin"}
-    if any(k in msg for k in ["四叉树", "Quadtree", "自适应剖分", "嵌套细分"]):
-        return "__ui_action__", {"action": "open_quadtree"}
-    if any(k in msg for k in ["三维", "3D", "立体", "高度场", "heightmap", "立体场景", "三维场景"]):
-        return "__ui_action__", {"action": "open_3d"}
-    if any(k in msg for k in ["点查询", "空间情报", "空间属性", "点击查询", "此点信息"]):
-        return "point_query", {}
-    if "渲染" in msg or "等高线" in msg or "阴影" in msg or "hillshade" in msg.lower():
-        return "dem_render", {}
-    if "坡度" in msg or "坡向" in msg or "地形" in msg:
-        return "dem_analyze", {"compute_slope": True, "compute_aspect": True}
-    if "汇流" in msg and ("累积" in msg or "分析" in msg):
-        return "flow_accumulation", {}
-    if "流域" in msg or "汇水" in msg:
-        return "watershed_delineate", {}
-    if "河网" in msg or "河流" in msg or "水系" in msg:
-        return "flow_accumulation", {}
-    if "剖面" in msg or "断面" in msg:
-        return "terrain_profile", {}
-    return "dem_analyze", {}
-
-
-def _keyword_fallback(msg: str) -> list[tuple[str, str, dict]]:
-    raster_kw = {"坡度", "坡向", "地形", "DEM", "dem", "汇流", "流域", "汇水", "剖面", "断面", "等高线", "河网", "河流", "水系", "渲染", "阴影", "hillshade"}
-    flood_kw = {"内涝", "淹没", "洪水", "积水", "预警", "排水", "风险区", "风险", "水动力", "淹没过程", "淹没演进", "洪水演进", "动态模拟", "洪泛", "二维模拟"}
-    hydro_kw = {"暴雨", "雨型", "产流", "径流", "SWMM", "swmm", "模型", "模拟", "洪峰", "调参", "率定", "校准"}
-    knowledge_kw = {"糙率", "manning", "曼宁", "CN", "曲线数", "管径", "DN", "HDPE", "设计标准", "重现期", "水泵", "LID", "海绵", "透水"}
-    gis_kw = {"导入", "上传", "缓冲", "叠加", "交集", "几何", "空间"}
-    ui_kw = {"3D", "三维", "立体", "heightmap", "三角网", "TIN", "不规则三角", "四叉树", "Quadtree", "嵌套剖分", "自适应剖分"}
-
-    matched = []
-    if any(k in msg for k in ui_kw):
-        tool, args = _pick_raster_tool(msg)
-        if tool == "__ui_action__":
-            matched.append(("ui", "__ui_action__", args))
-            return matched
-    if any(k in msg for k in raster_kw):
-        tool, args = _pick_raster_tool(msg)
-        matched.append(("raster", tool, args))
-    if any(k in msg for k in flood_kw):
-        tool, args = _pick_flood_tool(msg)
-        matched.append(("flood", tool, args))
-    hydro2d_active = any(t == "hydrodynamic_2d_sim" for _, t, _ in matched)
-    if any(k in msg for k in hydro_kw) and not hydro2d_active:
-        tool, args = _pick_hydro_tool(msg)
-        matched.append(("hydro", tool, args))
-    if any(k in msg for k in knowledge_kw):
-        matched.append(("knowledge", "get_parameter", {"parameter_name": _extract_param_name(msg)}))
-    if any(k in msg for k in gis_kw):
-        tool, args = _pick_gis_tool(msg)
-        matched.append(("gis", tool, args))
-
-    seen = set()
-    deduped = []
-    for s, t, a in matched:
-        key = f"{s}.{t}"
-        if key not in seen:
-            seen.add(key)
-            deduped.append((s, t, a))
-    return deduped
-
-
-def _extract_param_name(msg: str) -> str:
-    if any(k in msg for k in ("糙率", "manning", "曼宁")):
-        return "manning_n"
-    if any(k in msg for k in ("CN", "曲线数")):
-        return "scs_cn"
-    if any(k in msg for k in ("管径", "DN", "HDPE", "混凝土管", "铸铁")):
-        return "pipe_specs"
-    if any(k in msg for k in ("水泵", "泵站")):
-        return "pump_specs"
-    if any(k in msg for k in ("设计标准", "重现期", "径流系数")):
-        return "drainage_design"
-    if any(k in msg for k in ("LID", "海绵", "透水")):
-        return "lid_design"
-    if "暴雨" in msg or "雨型" in msg:
-        return "design_storm"
-    return "manning_n"
 
 
 if __name__ == "__main__":

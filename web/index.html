@@ -732,7 +732,7 @@ function send(){
       setTimeout(closeThinkingBox, 300);
       if(currentThinkingBox){
         var agentEl=currentThinkingBox.querySelector('.th-header');
-        if(agentEl)svcCallCounts[agentEl.textContent.split('—')[0].trim().replace(/\s/g,'').toLowerCase()]++;
+        if(agentEl){var ak=agentEl.textContent.split('—')[0].trim().replace(/\s/g,'').toLowerCase();if(svcCallCounts[ak]!==undefined)svcCallCounts[ak]++;}
       }
     }
 
@@ -787,7 +787,7 @@ function send(){
       es.close();
       const dur=data.duration_ms||0;
       if(botEl){
-        botEl.innerHTML+=`<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:10px;color:var(--text-dim);font-family:'JetBrains Mono',monospace">⚡ ${data.tools_called||0} tools &middot; ${dur}ms</div>`;
+        botEl.innerHTML+=`<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:10px;color:var(--text-dim);font-family:'JetBrains Mono',monospace">🧠 ${data.react_steps||0} steps &middot; ⚡ ${data.tools_called||0} tools &middot; ${dur}ms</div>`;
       }
       if(lastBotText){
         chatHistory.push({role:'assistant',content:lastBotText});
@@ -1377,7 +1377,7 @@ window.askWorkflow=function(name){
   window.runWorkflow();
 };
 
-var svcCallCounts={router:0,gis:0,data:0,knowledge:0,map:0,hydro:0,flood:0,raster:0};
+var svcCallCounts={router:0,planner:0,react:0,reflect:0,gis:0,data:0,knowledge:0,map:0,hydro:0,flood:0,raster:0};
 window.toggleDash=function(){document.getElementById('dashPanel').classList.toggle('hidden');if(!document.getElementById('dashPanel').classList.contains('hidden'))refreshDash()};
 function refreshDash(){
   var body=document.getElementById('dashBody');
