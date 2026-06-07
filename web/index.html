@@ -833,6 +833,113 @@ document.querySelectorAll('.agent-card').forEach(c=>{
   });
 });
 
+function renderGenericResult(tool, server, result){
+  if(!result||typeof result!=='object') return '<span style="color:var(--text-dim)">⚙️ '+server+'.'+tool+': '+String(result||'').slice(0,200)+'</span>';
+  var h='<div style="border:1px solid #00d4ff33;border-radius:8px;padding:10px 14px;background:#0d1117;margin-top:4px">';
+  var hasViz=false;
+  // 1. image_base64 → 直接显示图片
+  if(result.image_base64){
+    h+='<img src="data:image/png;base64,'+result.image_base64+'" style="max-width:100%;border-radius:6px;margin:4px 0"/>';
+    hasViz=true;
+  }
+  // 2. geojson → 地图绘制
+  if(result.geojson||(result.coordinates&&Array.isArray(result.coordinates))){
+    var gj=result.geojson||{type:"Feature",geometry:{type:result.geometry_type||"Polygon",coordinates:result.coordinates},properties:{name:tool}};
+    try{
+      var l=L.geoJSON(gj,{style:{color:"#00d4ff",fillColor:"#00d4ff",fillOpacity:.25,weight:2}}).addTo(map);
+      addMapLayer(l);
+      try{map.fitBounds(l.getBounds().pad(.2))}catch(e){}
+      h+='<div style="color:#00d4ff;margin:4px 0">🗺️ 已绘制到地图</div>';
+      hasViz=true;
+    }catch(e){ h+='<div style="color:#ff8800">地图绘制失败: '+e.message+'</div>'; }
+  }
+  // 3. points / markers → 地图标记
+  if(result.points&&Array.isArray(result.points)&&result.points.length>0){
+    var bnds=[];
+    result.points.forEach(function(p){
+      var lat=p.lat||p.y||0, lng=p.lng||p.lon||p.x||0, label=p.label||p.name||p.z||'';
+      if(lat&&lng){
+        var mk=L.circleMarker([lat,lng],{radius:6,fillColor:'#00ff88',color:'#00ff88',fillOpacity:.8}).addTo(map);
+        if(label) mk.bindPopup(String(label));
+        addMapLayer(mk);bnds.push([lat,lng]);
+      }
+    });
+    if(bnds.length>1) try{map.fitBounds(bnds)}catch(e){}
+    if(bnds.length>0){h+='<div style="color:#00ff88;margin:4px 0">📍 '+bnds.length+'个点已标记到地图</div>';hasViz=true;}
+  }
+  // 4. time_series / data_points → SVG折线/柱状图
+  var tsData=result.time_series||result.data_points||result.series||result.values;
+  if(tsData&&Array.isArray(tsData)&&tsData.length>2){
+    var vals=tsData.map(function(v){return typeof v==='object'?(v.value||v.y||v.z||v.elevation||0):v;});
+    var labels=tsData.map(function(v,i){return typeof v==='object'?(v.label||v.name||v.time||i):i;});
+    var maxV=Math.max.apply(null,vals)||1, minV=Math.min.apply(null,vals);
+    var range=maxV-minV||1;
+    var isBar=result.chart_type==='bar'||tool.indexOf('rain')>=0||tool.indexOf('storm')>=0;
+    var svg='<svg viewBox="0 0 420 160" style="width:100%;max-width:420px;border-radius:6px;background:#0a0e1a;margin:4px 0">';
+    // grid lines
+    for(var gi=0;gi<5;gi++){
+      var gy=135-gi*26;
+      svg+='<line x1="35" y1="'+gy+'" x2="405" y2="'+gy+'" stroke="#1a2332" stroke-width="1"/>';
+      svg+='<text x="32" y="'+(gy+3)+'" fill="#445566" font-size="8" text-anchor="end">'+(minV+gi*range/4).toFixed(1)+'</text>';
+    }
+    if(isBar){
+      var bw=360/tsData.length;
+      vals.forEach(function(v,i){
+        var bh=Math.max(2,(v-minV)/range*110);
+        var bx=i*bw+38;
+        var color=v>maxV*.7?'#ff4400':v>maxV*.4?'#ffaa00':'#00ccff';
+        svg+='<rect x="'+bx+'" y="'+(135-bh)+'" width="'+Math.max(bw-2,2)+'" height="'+bh+'" fill="'+color+'" opacity=".85" rx="1"/>';
+      });
+    }else{
+      var pd='';vals.forEach(function(v,i){var x=i/(vals.length-1)*370+35;var y=135-((v-minV)/range)*110;pd+=(i===0?'M':'L')+x+' '+y;});
+      // area fill
+      var fd=pd+' L '+(35+370)+' 135 L 35 135 Z';
+      svg+='<path d="'+fd+'" fill="url(#aGrad)" opacity=".15"/><defs><linearGradient id="aGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#00d4ff"/><stop offset="100%" stop-color="#0a0e1a"/></linearGradient></defs>';
+      svg+='<path d="'+pd+'" fill="none" stroke="#00d4ff" stroke-width="2"/>';
+      // dots
+      vals.forEach(function(v,i){if(i%Math.max(1,Math.floor(vals.length/20))===0){var x=i/(vals.length-1)*370+35;var y=135-((v-minV)/range)*110;svg+='<circle cx="'+x+'" cy="'+y+'" r="3" fill="#00d4ff"/>';}});
+    }
+    var title=result.title||result.name||tool;
+    svg+='<text x="35" y="14" fill="#667788" font-size="10">'+title+'</text><text x="405" y="152" fill="#445566" font-size="8" text-anchor="end">'+vals.length+'点</text></svg>';
+    h+=svg;hasViz=true;
+  }
+  // 5. table / rows → HTML表格
+  var tbl=result.table||result.rows||result.results;
+  if(tbl&&Array.isArray(tbl)&&tbl.length>0&&typeof tbl[0]==='object'){
+    var keys=Object.keys(tbl[0]).slice(0,6);
+    h+='<table style="width:100%;border-collapse:collapse;margin:6px 0;font-size:11px">';
+    h+='<tr>'+keys.map(function(k){return '<th style="border:1px solid #1a2332;padding:4px 8px;color:#00d4ff;background:#0d1117;text-align:left">'+k+'</th>';}).join('')+'</tr>';
+    tbl.slice(0,15).forEach(function(row){
+      h+='<tr>'+keys.map(function(k){var v=row[k];return '<td style="border:1px solid #1a2332;padding:3px 8px;color:var(--text-dim)">'+(typeof v==='number'?v.toFixed?v.toFixed(3):v:String(v||'').slice(0,40))+'</td>';}).join('')+'</tr>';
+    });
+    if(tbl.length>15) h+='<tr><td colspan="'+keys.length+'" style="padding:4px;color:#445566;text-align:center">... 共'+tbl.length+'行</td></tr>';
+    h+='</table>';hasViz=true;
+  }
+  // 6. summary / key-value pairs
+  var kvFields=['result','value','answer','output','summary','description','thickness','area','volume','length','count','total','mean','std','min','max','median'];
+  var kvHtml='';
+  kvFields.forEach(function(k){
+    if(result[k]!==undefined&&result[k]!==null){
+      var v=result[k];
+      var label=k.replace(/_/g,' ');
+      kvHtml+='<div style="font-size:12px;margin:2px 0"><span style="color:#00d4ff">'+label+': </span><span style="color:var(--text-dim)">'+(typeof v==='number'?(v.toFixed?v.toFixed(4):v):String(v).slice(0,120))+'</span></div>';
+    }
+  });
+  if(kvHtml){h+='<div style="margin-top:6px">'+kvHtml+'</div>';hasViz=true;}
+  // 7. _generated_tool 标签
+  if(result._generated_tool){
+    h='<div style="color:#00ff88;font-size:11px;margin-bottom:6px">🤖 自动生成: '+result._generated_tool+'</div>'+h;
+  }
+  // fallback: 如果没有匹配到任何可视化，显示 JSON
+  if(!hasViz){
+    var jsonStr=JSON.stringify(result,null,2);
+    if(jsonStr.length>600) jsonStr=jsonStr.slice(0,600)+'\n...';
+    h+='<pre style="color:var(--text-dim);font-size:11px;white-space:pre-wrap;max-height:200px;overflow:auto">'+jsonStr.replace(/</g,'&lt;')+'</pre>';
+  }
+  h+='</div>';
+  return h;
+}
+
 function renderToolResult(tool, server, result){
   const richEl=addMsg('bot','');
   if(result&&result.error){richEl.innerHTML='<span style="color:#ff4444">❌ '+result.error+'</span>';return richEl}
@@ -921,7 +1028,8 @@ function renderToolResult(tool, server, result){
     var pct=result.inundation_pct?(result.inundation_pct*100).toFixed(1):'?';
     richEl.innerHTML='<span style="color:#00d4ff">🌊 淹没分析: '+pct+'% 区域被淹 ('+result.flooded_cells+' cells)</span>';
   }else{
-    const preview=JSON.stringify(result).slice(0,200);richEl.innerHTML='<span style="color:var(--text-dim)">⚙️ '+server+'.'+tool+': '+preview+'</span>';
+    // ── Auto-tool / unknown tool 通用智能渲染器 ──
+    richEl.innerHTML = renderGenericResult(tool, server, result);
   }
   document.getElementById('messages').scrollTop=99999;
   return richEl;
