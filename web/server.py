@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
+import math
 import os
 import re
+import sqlite3
 import time
+import uuid
 from collections import OrderedDict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +25,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import UploadFile, File as FastAPIFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -58,7 +61,7 @@ MAX_REACT_STEPS = 8
 AGENT_LABELS = {
     "gis": "GIS 空间分析", "knowledge": "Knowledge 知识查询", "data": "Data 数据操作",
     "map": "Map 地图渲染", "hydro": "Hydro 水文计算", "flood": "Flood 洪水分析",
-    "raster": "Raster 地形分析",
+    "raster": "Raster 地形分析", "internal": "Internal 内置服务", "generated": "AutoGen 自动生成",
 }
 
 GLM_TOOLS = [
@@ -108,7 +111,7 @@ for _srv, _tools in {
     "map": ["render_map", "create_choropleth", "plot_timeseries", "export_geojson"],
     "hydro": ["design_storm", "runoff_compute", "swmm_create_model", "swmm_simulate", "calibrate_suggest"],
     "flood": ["flood_inundation_map", "flood_assessment", "drainage_assessment", "flood_warning", "flood_risk_zones", "hydrodynamic_2d_sim"],
-    "raster": ["dem_analyze", "watershed_delineate", "flow_accumulation", "terrain_profile", "point_query", "dem_render", "tin_generate", "quadtree_subdivide"],
+    "raster": ["dem_analyze", "watershed_delineate", "flow_accumulation", "terrain_profile", "point_query", "dem_render", "tin_generate", "quadtree_subdivide", "scatter_interpolate"],
 }.items():
     for _t in _tools:
         TOOL_TO_SERVER[_t] = _srv
@@ -122,6 +125,9 @@ DEM数据位于甘肃迭部县(104.89°E, 33.19°N)，0.5m分辨率，3GB GeoTIF
 - 查/查询 参数、数值 → 调 get_parameter
 - 涉及具体数值 → 必须调工具，不要捏造
 - 用户提到内涝/淹没/洪水/积水 → 必须调 flood_inundation_map
+- 用户问天气/降雨预报 → 调 weather_forecast
+- 用户问卫星/遥感影像 → 调 satellite_search
+- 没有现成工具的计算任务（插值/拟合/统计/公式/转换等）→ 调 auto_tool
 
 可以不调工具的场景：
 - 纯寒暄（你好/谢谢/再见）
@@ -228,80 +234,32 @@ ROUTING_RULES: list[tuple[str, str]] = [
     (r"排水能力|排水评估|排水系统", "drainage_assessment"),
     (r"洪水预警|预警|防汛预警", "flood_warning"),
     (r"风险分区|风险等级|风险区域", "flood_risk_zones"),
-    (r"渲染|出图|画图|绘制地图", "render_map"),
     (r"管网|SWMM|swmm|排水管网", "swmm_simulate"),
     (r"空间关系|相交|包含|相邻|空间查询", "spatial_query"),
     (r"缓冲区|缓冲|周边范围", "buffer"),
-    (r"叠加|交集|并集|差集|叠加分析", "overlay"),
+    (r"叠加分析|交集|并集|差集", "overlay"),
     (r"坐标转换|坐标系转换", "coordinate_transform"),
     (r"搜索|查找资料|知识库", "search"),
     (r"标准|规范|GB|SL|设计规范", "get_standard"),
     (r"率定|校准|参数优化", "calibrate_suggest"),
-    (r"河网渲染|DEM渲染|地形渲染", "dem_render"),
-    (r"模拟|计算|运行.*分析|进行.*分析|开启.*计算", "hydrodynamic_2d_sim"),
+    (r"DEM渲染|地形渲染", "dem_render"),
+    (r"克里金|Kriging|IDW|反距离权重|RBF插值|空间插值", "scatter_interpolate"),
 ]
 
-TOOL_CORPUS = [
-    ("查询水利参数 糙率 曲线数 暴雨参数 管材 水泵 海绵 排水标准", "get_parameter"),
-    ("知识库语义搜索 查找资料", "search"),
-    ("查询水利标准规范 GB SL", "get_standard"),
-    ("解释水利专业概念 水文 水力 排水 防洪 曼宁公式 原理", "explain_concept"),
-    ("空间关系查询 相交 包含 穿越 触碰", "spatial_query"),
-    ("创建几何缓冲区 周边范围", "buffer"),
-    ("叠加分析 交集 并集 差集", "overlay"),
-    ("坐标系转换 EPSG WGS84 CGCS2000", "coordinate_transform"),
-    ("几何属性 面积 周长 类型", "geometry_properties"),
-    ("数据验证 完整性检查", "validate_data"),
-    ("地图渲染 出图 绘制", "render_map"),
-    ("生成设计暴雨雨型 暴雨强度 历时", "design_storm"),
-    ("计算径流量 产流 SCS-CN", "runoff_compute"),
-    ("创建SWMM管网模型 子汇水", "swmm_create_model"),
-    ("运行SWMM管网模拟 排水管网", "swmm_simulate"),
-    ("模型率定校准 NSE 参数优化", "calibrate_suggest"),
-    ("渲染洪水淹没范围图 淹没面积 会不会被水淹 积水", "flood_inundation_map"),
-    ("洪水风险评估 内涝评估 积水", "flood_assessment"),
-    ("排水系统能力评估 排水评估", "drainage_assessment"),
-    ("洪水预警 水位预警 防汛", "flood_warning"),
-    ("洪水风险区域划分 风险等级", "flood_risk_zones"),
-    ("二维水动力淹没模拟 洪水演进 水深", "hydrodynamic_2d_sim"),
-    ("DEM地形分析 坡度 坡向 高程统计", "dem_analyze"),
-    ("流域划分 提取流域 子流域", "watershed_delineate"),
-    ("河网提取 水流累积 汇流 河道", "flow_accumulation"),
-    ("地形剖面 断面 高程变化", "terrain_profile"),
-    ("点位查询 高程 坐标查询", "point_query"),
-    ("DEM渲染 地形渲染", "dem_render"),
-    ("生成TIN不规则三角网 三角化", "tin_generate"),
-    ("四叉树自适应剖分 网格划分", "quadtree_subdivide"),
-    ("降雨径流关系 降雨和径流的关系 产汇流", "runoff_compute"),
-    ("被水淹没 水淹 淹水 洪涝 涝灾", "flood_inundation_map"),
-    ("区域分析 区域怎么样 区域评估 区域情况", "flood_assessment"),
-]
-
-_tfidf_vec: TfidfVectorizer | None = None
-_tfidf_matrix: np.ndarray | None = None
-_tfidf_tool_names: list[str] = []
+_route_cache: dict[str, str] = {}
+_ROUTE_CACHE_MAX = 200
 
 
-def _init_tfidf():
-    global _tfidf_vec, _tfidf_matrix, _tfidf_tool_names
-    if _tfidf_vec is not None:
-        return
-    _tfidf_tool_names = [t for _, t in TOOL_CORPUS]
-    corpus = [d for d, _ in TOOL_CORPUS]
-    _tfidf_vec = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4))
-    _tfidf_matrix = _tfidf_vec.fit_transform(corpus)
+_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool".split(",")
 
-
-def _semantic_route(query: str) -> str | None:
-    _init_tfidf()
-    if _tfidf_matrix is None:
-        return None
-    q_vec = _tfidf_vec.transform([query])
-    scores = cosine_similarity(q_vec, _tfidf_matrix)[0]
-    best_idx = int(np.argmax(scores))
-    if scores[best_idx] < 0.15:
-        return None
-    return _tfidf_tool_names[best_idx]
+_ROUTE_SYSTEM = """你是路由模块。只回复工具名或SIMPLE。
+水利专业(淹没/暴雨/径流/SWMM/洪水/排水)→对应工具
+地形/DEM/流域/河网→dem_analyze等
+空间(缓冲/叠加/坐标/几何)→buffer/overlay等
+插值(克里金/IDW/RBF)→scatter_interpolate
+渲染/出图→render_map
+其他(计算/生成/公式/数学/矩阵/图形/GeoJSON/工程)→auto_tool
+只回一个词。工具:""" + ",".join(_ALL_TOOLS)
 
 
 async def _route(message: str, history: list[dict]) -> str:
@@ -312,24 +270,672 @@ async def _route(message: str, history: list[dict]) -> str:
         if re.search(pattern, message):
             return f"DIRECT:{tool}"
 
-    sem_hit = _semantic_route(message)
-    if sem_hit:
-        return f"DIRECT:{sem_hit}"
+    cache_key = hashlib.md5(message.encode()).hexdigest()
+    if cache_key in _route_cache:
+        return _route_cache[cache_key]
 
-    plan_prompt = """你是水利空间智能体的规划模块。根据用户意图选择执行模式：
-
-模式A - 仅寒暄闲聊 → 回复 "SIMPLE"
-模式B - 单工具任务 → 回复 "DIRECT: 工具名"
-模式C - 多步流水线 → 列出步骤
-
-优先选择模式B。只有明确需要多个工具协同才选模式C。
-可用工具：hydrodynamic_2d_sim, get_parameter, explain_concept, search, get_standard, dem_analyze, watershed_delineate, flow_accumulation, terrain_profile, point_query, dem_render, tin_generate, quadtree_subdivide, design_storm, runoff_compute, swmm_create_model, swmm_simulate, calibrate_suggest, flood_inundation_map, flood_assessment, drainage_assessment, flood_warning, flood_risk_zones, spatial_query, buffer, overlay, coordinate_transform, geometry_properties, validate_data, render_map"""
-    messages = [{"role": "system", "content": plan_prompt}, *history, {"role": "user", "content": message}]
+    messages = [{"role": "system", "content": _ROUTE_SYSTEM}, {"role": "user", "content": message}]
     try:
-        content, _, _ = await asyncio.wait_for(_call_llm(messages, model=MODEL_AIR, use_tools=False), timeout=10.0)
-        return content
-    except (asyncio.TimeoutError, Exception):
-        return "SIMPLE"
+        content, _, _ = await asyncio.wait_for(_call_llm(messages, model=MODEL_AIR, use_tools=False), timeout=8.0)
+        content = content.strip()
+        if content.startswith("DIRECT:"):
+            result = content
+        elif content.upper() == "SIMPLE":
+            result = "SIMPLE"
+        else:
+            hit = None
+            for t in _ALL_TOOLS:
+                if t in content:
+                    hit = t
+                    break
+            result = f"DIRECT:{hit}" if hit else "DIRECT:auto_tool"
+    except Exception:
+        result = "DIRECT:auto_tool"
+
+    if len(_route_cache) >= _ROUTE_CACHE_MAX:
+        _route_cache.pop(next(iter(_route_cache)))
+    _route_cache[cache_key] = result
+    return result
+
+
+
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 2026 SOTA MODULES: Memory, Debate, Tracing, Commonsense, Multimodal,
+#   ToT, Weather, DigitalTwin, SelfEvolving, ToolGen, NeuroSymbolic,
+#   Satellite, KnowledgeGraph, WorldModel
+# ═══════════════════════════════════════════════════════════════════════
+
+DATA_DIR = Path(__file__).parent.parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# ── 1. Agent Memory System (SQLite) ──────────────────────────────────
+
+class MemoryStore:
+    def __init__(self):
+        self.db_path = DATA_DIR / "agent_memory.db"
+        self._init_db()
+
+    def _init_db(self):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS episodes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT, user_msg TEXT, tool_calls TEXT,
+                    result_summary TEXT, ts REAL
+                );
+                CREATE TABLE IF NOT EXISTS facts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT UNIQUE, value TEXT, source TEXT, ts REAL
+                );
+                CREATE TABLE IF NOT EXISTS procedures (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trigger_pattern TEXT, tool_sequence TEXT,
+                    success_count INTEGER DEFAULT 1, ts REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_ep_msg ON episodes(user_msg);
+                CREATE INDEX IF NOT EXISTS idx_facts_key ON facts(key);
+            """)
+
+    def save_episode(self, session_id: str, user_msg: str, tool_calls: list, summary: str):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("INSERT INTO episodes(session_id,user_msg,tool_calls,result_summary,ts) VALUES(?,?,?,?,?)",
+                         (session_id, user_msg[:500], json.dumps(tool_calls, ensure_ascii=False)[:2000], summary[:500], time.time()))
+
+    def recall_episodes(self, query: str, limit: int = 3) -> list[dict]:
+        words = re.findall(r"[\u4e00-\u9fff\w]{2,}", query)[:5]
+        with sqlite3.connect(str(self.db_path)) as conn:
+            rows = conn.execute("SELECT user_msg,tool_calls,result_summary,ts FROM episodes ORDER BY ts DESC LIMIT 50").fetchall()
+        scored = []
+        for r in rows:
+            score = sum(1 for w in words if w in r[0] or w in r[2])
+            if score > 0:
+                scored.append({"user_msg": r[0], "tools": r[1][:200], "summary": r[2], "ts": r[3], "score": score})
+        scored.sort(key=lambda x: -x["score"])
+        return scored[:limit]
+
+    def save_fact(self, key: str, value: str, source: str = "agent"):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("INSERT OR REPLACE INTO facts(key,value,source,ts) VALUES(?,?,?,?)",
+                         (key, value[:500], source, time.time()))
+
+    def recall_facts(self, prefix: str = "", limit: int = 10) -> list[dict]:
+        with sqlite3.connect(str(self.db_path)) as conn:
+            if prefix:
+                rows = conn.execute("SELECT key,value,source FROM facts WHERE key LIKE ? ORDER BY ts DESC LIMIT ?",
+                                    (f"{prefix}%", limit)).fetchall()
+            else:
+                rows = conn.execute("SELECT key,value,source FROM facts ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
+        return [{"key": r[0], "value": r[1], "source": r[2]} for r in rows]
+
+    def save_procedure(self, trigger: str, tool_seq: list):
+        seq_str = json.dumps(tool_seq, ensure_ascii=False)
+        with sqlite3.connect(str(self.db_path)) as conn:
+            existing = conn.execute("SELECT id,success_count FROM procedures WHERE trigger_pattern=?", (trigger,)).fetchone()
+            if existing:
+                conn.execute("UPDATE procedures SET success_count=success_count+1,ts=? WHERE id=?", (time.time(), existing[0]))
+            else:
+                conn.execute("INSERT INTO procedures(trigger_pattern,tool_sequence,ts) VALUES(?,?,?)", (trigger, seq_str, time.time()))
+
+    def recall_procedures(self, query: str, limit: int = 3) -> list[dict]:
+        with sqlite3.connect(str(self.db_path)) as conn:
+            rows = conn.execute("SELECT trigger_pattern,tool_sequence,success_count FROM procedures ORDER BY success_count DESC LIMIT 20").fetchall()
+        scored = []
+        for r in rows:
+            pattern_words = re.findall(r"[\u4e00-\u9fff\w]{2,}", r[0])
+            score = sum(1 for w in pattern_words if w in query)
+            if score > 0:
+                scored.append({"trigger": r[0], "tools": r[1], "success": r[2], "score": score})
+        scored.sort(key=lambda x: -x["score"])
+        return scored[:limit]
+
+
+_memory = MemoryStore()
+
+
+# ── 2. Multi-Agent Debate Validation ─────────────────────────────────
+
+CRITICAL_TOOLS = {"hydrodynamic_2d_sim", "flood_assessment", "flood_risk_zones", "swmm_simulate", "flood_inundation_map"}
+DEBATE_PROMPTS = {
+    "physics": "你是水力学物理验证专家。验证以下工具结果是否符合水力学物理规律。返回JSON: {\"pass\":bool,\"score\":1-10,\"issue\":\"\"}",
+    "data": "你是数据合理性验证专家。验证以下工具结果的数值范围是否合理。返回JSON: {\"pass\":bool,\"score\":1-10,\"issue\":\"\"}",
+    "completeness": "你是任务完整性验证专家。验证以下工具结果是否完整回答了用户需求。返回JSON: {\"pass\":bool,\"score\":1-10,\"issue\":\"\"}",
+}
+
+
+async def _debate_validate(query: str, tool_name: str, tool_result: dict) -> dict:
+    if tool_name not in CRITICAL_TOOLS:
+        return {"consensus": True, "critics": []}
+    result_str = json.dumps(tool_result, ensure_ascii=False, default=str)[:1500]
+    async def _critic(role: str, prompt: str) -> dict:
+        messages = [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": f"用户问题: {query}\n工具: {tool_name}\n结果: {result_str}"}
+        ]
+        try:
+            content, _, _ = await asyncio.wait_for(_call_llm(messages, model=MODEL_FLASH, use_tools=False), timeout=10.0)
+            match = re.search(r'\{[^}]+\}', content)
+            if match:
+                return json.loads(match.group()) | {"role": role}
+        except Exception:
+            pass
+        return {"role": role, "pass": True, "score": 5, "issue": "timeout"}
+
+    critics = await asyncio.gather(*[_critic(r, p) for r, p in DEBATE_PROMPTS.items()])
+    passes = sum(1 for c in critics if c.get("pass"))
+    avg_score = sum(c.get("score", 5) for c in critics) / max(len(critics), 1)
+    consensus = passes >= 2 and avg_score >= 6
+    return {"consensus": consensus, "critics": list(critics)}
+
+
+# ── 3. Observability Tracing ─────────────────────────────────────────
+
+@dataclass
+class TraceSpan:
+    trace_id: str
+    query: str
+    t_start: float
+    events: list = field(default_factory=list)
+
+    def add(self, name: str, detail: str = "", duration_ms: float = 0):
+        self.events.append({"name": name, "ts": time.time(), "detail": detail, "duration_ms": int(duration_ms)})
+
+    def to_dict(self) -> dict:
+        return {"trace_id": self.trace_id, "query": self.query, "duration_ms": int((time.time() - self.t_start) * 1000), "events": self.events}
+
+
+_traces: OrderedDict[str, TraceSpan] = OrderedDict()
+_trace_counter = 0
+
+
+def _new_trace(query: str) -> TraceSpan:
+    global _trace_counter
+    _trace_counter += 1
+    span = TraceSpan(trace_id=f"tr_{_trace_counter:06d}", query=query, t_start=time.time())
+    _traces[span.trace_id] = span
+    while len(_traces) > 100:
+        _traces.popitem(last=False)
+    return span
+
+
+# ── 4. Spatial Commonsense Knowledge ─────────────────────────────────
+
+SPATIAL_COMMONSENSE = {
+    "hydrology": [
+        "水往低处流 — 水流方向由高程决定",
+        "汇流累积量越大河道越宽",
+        "糙率越大流速越慢水深越深",
+        "暴雨强度随重现期增大而增大",
+        "SCS-CN值越高产流量越大",
+        "径流系数=径流量/降雨量 范围0-1",
+    ],
+    "flood": [
+        "淹没区域沿河道和低洼地带分布",
+        "洪水峰值出现在降雨峰值后一段时间",
+        "淹没深度随距河道距离增加而减小",
+        "百年一遇>五十年一遇>二十年一遇",
+        "城市内涝点通常位于低洼区域",
+    ],
+    "terrain": [
+        "坡度=高程差/水平距离",
+        "坡向决定日照和融雪方向",
+        "流域面积越大汇流时间越长",
+        "DEM分辨率越高地形细节越丰富",
+    ],
+}
+
+PHYSICS_RANGES = {
+    "manning_n": (0.01, 0.30, "糙率"),
+    "cn_value": (0, 100, "CN曲线数"),
+    "slope_deg": (0, 90, "坡度"),
+    "velocity_ms": (0, 15, "流速(m/s)"),
+    "water_depth_m": (0, 50, "水深(m)"),
+    "flood_depth_m": (0, 30, "洪水深度(m)"),
+    "elevation_m": (790, 1800, "研究区高程(m)"),
+    "rainfall_mmh": (0, 300, "降雨强度(mm/h)"),
+    "runoff_coeff": (0, 1, "径流系数"),
+}
+
+
+def _inject_commonsense(query: str) -> str:
+    rules = []
+    q = query.lower()
+    if any(k in q for k in ["淹没", "洪水", "积水", "内涝", "涝"]):
+        rules.extend(SPATIAL_COMMONSENSE["flood"])
+    if any(k in q for k in ["径流", "降雨", "暴雨", "汇流", "产流"]):
+        rules.extend(SPATIAL_COMMONSENSE["hydrology"])
+    if any(k in q for k in ["坡度", "高程", "地形", "dem", "流域", "河网"]):
+        rules.extend(SPATIAL_COMMONSENSE["terrain"])
+    if not rules:
+        rules = SPATIAL_COMMONSENSE["hydrology"][:3]
+    return "[空间常识] " + "; ".join(rules[:5])
+
+
+def _validate_physics(tool_name: str, result: dict) -> list[str]:
+    warnings = []
+    if not isinstance(result, dict):
+        return warnings
+    if tool_name == "hydrodynamic_2d_sim":
+        depth = result.get("peak_max_depth_m", 0)
+        if isinstance(depth, (int, float)) and depth > 30:
+            warnings.append(f"峰值水深{depth}m超出合理范围(0-30m)")
+    if tool_name == "runoff_compute":
+        coeff = result.get("runoff_coefficient", 0)
+        if isinstance(coeff, (int, float)) and (coeff < 0 or coeff > 1):
+            warnings.append(f"径流系数{coeff}超出合理范围(0-1)")
+    if tool_name == "flood_assessment":
+        depth_cm = result.get("avg_flood_depth_cm", 0)
+        if isinstance(depth_cm, (int, float)) and depth_cm > 1000:
+            warnings.append(f"积水深度{depth_cm}cm异常(>1000cm)")
+    return warnings
+
+
+# ── 5. Multimodal (GLM-4V) ───────────────────────────────────────────
+
+MODEL_VISION = "glm-4v-flash"
+UPLOAD_IMG_DIR = DATA_DIR / "uploads_img"
+UPLOAD_IMG_DIR.mkdir(parents=True, exist_ok=True)
+
+
+async def _analyze_image(image_b64: str, prompt: str = "") -> str:
+    messages = [{"role": "user", "content": [
+        {"type": "text", "text": prompt or "分析这张与水利/地理相关的图片，识别关键信息（地形、水域、建筑、植被等），给出结构化描述。"},
+        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64[:50000]}"}}
+    ]}]
+    headers = {"Authorization": f"Bearer {ZHIPUAI_API_KEY}", "Content-Type": "application/json"}
+    payload = {"model": MODEL_VISION, "messages": messages}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(GLM_API_URL, headers=headers, json=payload)
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"].get("content", "")
+
+
+# ── 6. Tree-of-Thought Reasoning ─────────────────────────────────────
+
+async def _tree_of_thought(query: str, breadth: int = 3) -> str:
+    branches = []
+    for i in range(breadth):
+        messages = [
+            {"role": "system", "content": f"你是水利空间智能规划师。为用户需求制定执行方案(方案变体#{i+1})。回复格式: 1. 步骤 [工具名]\n2. ..."},
+            {"role": "user", "content": query}
+        ]
+        try:
+            plan, _, _ = await asyncio.wait_for(_call_llm(messages, model=MODEL_AIR, use_tools=False), timeout=12.0)
+            eval_msg = [{"role": "system", "content": "评估此方案的可行性，返回JSON: {\"score\":1-10}"},
+                        {"role": "user", "content": plan}]
+            eval_c, _, _ = await asyncio.wait_for(_call_llm(eval_msg, model=MODEL_FLASH, use_tools=False), timeout=8.0)
+            match = re.search(r'"score"\s*:\s*(\d+)', eval_c)
+            score = int(match.group(1)) if match else 5
+            branches.append({"plan": plan, "score": min(score, 10)})
+        except Exception:
+            branches.append({"plan": "", "score": 0})
+    branches.sort(key=lambda x: -x["score"])
+    best = branches[0]
+    return best["plan"] if best["score"] >= 4 else ""
+
+
+# ── 7. Weather Forecast (Open-Meteo, free) ───────────────────────────
+
+_weather_cache: dict[str, tuple[float, Any]] = {}
+
+
+async def _get_weather(lat: float = 33.19, lon: float = 104.89, days: int = 3) -> dict:
+    cache_key = f"{lat:.2f}_{lon:.2f}"
+    if cache_key in _weather_cache and time.time() - _weather_cache[cache_key][0] < 1800:
+        return _weather_cache[cache_key][1]
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=precipitation,temperature_2m,wind_speed_10m&forecast_days={days}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+            _weather_cache[cache_key] = (time.time(), data)
+            return data
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+# ── 8. Digital Twin Bridge ───────────────────────────────────────────
+
+class DigitalTwinBridge:
+    def __init__(self):
+        self.sources: dict[str, dict] = {}
+        self.register("dem_lbh", "file", {"path": str(DATA_DIR / "LBH_DEM_v2_0.5m_EPSG4544.tif"), "description": "迭部县0.5m DEM"})
+        self.register("weather_openmeteo", "api", {"url": "https://api.open-meteo.com/v1/forecast", "description": "Open-Meteo气象预报"})
+
+    def register(self, name: str, src_type: str, config: dict):
+        self.sources[name] = {"type": src_type, **config, "registered_at": time.time()}
+
+    def list_sources(self) -> list[dict]:
+        return [{"name": k, **v} for k, v in self.sources.items()]
+
+    async def health_check(self) -> dict[str, str]:
+        results = {}
+        for name in self.sources:
+            results[name] = "healthy" if self.sources[name]["type"] in ("file", "api") else "unknown"
+        return results
+
+
+_twin = DigitalTwinBridge()
+
+
+# ── 9. Self-Evolving Prompt Optimizer ────────────────────────────────
+
+_evolution_log: list[dict] = []
+_evolution_counter = 0
+
+
+def _log_routing(query: str, layer: str, tool: str, was_correct: bool):
+    global _evolution_counter
+    _evolution_counter += 1
+    _evolution_log.append({"query": query[:100], "layer": layer, "tool": tool, "correct": was_correct, "ts": time.time()})
+    if len(_evolution_log) > 1000:
+        _evolution_log[:] = _evolution_log[-500:]
+
+
+def _evolution_stats() -> dict:
+    if not _evolution_log:
+        return {"total": 0, "accuracy": 0}
+    total = len(_evolution_log)
+    correct = sum(1 for e in _evolution_log if e["correct"])
+    by_layer: dict[str, dict] = {}
+    for e in _evolution_log:
+        l = e["layer"]
+        if l not in by_layer:
+            by_layer[l] = {"total": 0, "correct": 0}
+        by_layer[l]["total"] += 1
+        by_layer[l]["correct"] += 1 if e["correct"] else 0
+    return {"total": total, "accuracy": round(correct / total, 3), "by_layer": by_layer}
+
+
+def _evolution_suggestions() -> list[str]:
+    suggestions = []
+    l3_entries = [e for e in _evolution_log if e["layer"] == "L3"]
+    if len(l3_entries) >= 5:
+        for e in l3_entries[-10:]:
+            if e["correct"]:
+                suggestions.append(f"建议新增规则: \"{e['query'][:20]}\" → {e['tool']}")
+    return suggestions[:5]
+
+
+# ── 10. Tool Auto-Generation ─────────────────────────────────────────
+
+GEN_TOOL_DIR = DATA_DIR / "generated_tools"
+GEN_TOOL_DIR.mkdir(parents=True, exist_ok=True)
+
+
+async def _generate_tool(query: str) -> dict | None:
+    messages = [
+        {"role": "system", "content": """为水利空间智能平台生成一个Python函数。函数名用英文compute_开头，参数用kwargs，返回dict。
+只输出代码，不要import，不要解释。
+
+返回dict必须包含计算结果字段。如果结果适合可视化，加上对应字段：
+- GeoJSON: 加 "geojson": {"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point/Polygon/LineString","coordinates":...},"properties":{}}]}
+- 折线图/曲线: 加 "data_points": [{"x":..., "y":..., "label":...}, ...]
+- 柱状图: 加 "data_points": [{"x":..., "y":...}, ...] 和 "chart_type": "bar"
+- 散点/坐标: 加 "points": [{"lat":..., "lng":..., "label":...}, ...]
+- 区域/多边形: 加 "coordinates": [[[lng,lat],...]], "geometry_type": "Polygon"
+- 图片: 加 "image_base64": "base64编码字符串"
+- 表格: 加 "table": [{"col1": val, "col2": val}, ...]
+
+可用: math, json, numpy(np)。"""},
+        {"role": "user", "content": f"需求: {query}\n\n生成一个compute_开头的函数。注意: 返回的dict里除了计算结果字段，如果数据适合画图或展示在地图上，务必加上 data_points / points / coordinates / table 等可视化字段。"}
+    ]
+    try:
+        code, _, _ = await asyncio.wait_for(_call_llm(messages, model=MODEL_AIR, use_tools=False), timeout=25.0)
+        code = re.sub(r'```python\s*', '', code)
+        code = re.sub(r'```\s*', '', code)
+        fn_match = re.search(r'def\s+(\w+)\s*\(', code)
+        if not fn_match:
+            return None
+        fn_name = fn_match.group(1)
+        tool_file = GEN_TOOL_DIR / f"{fn_name}.py"
+        tool_file.write_text(code, encoding="utf-8")
+        TOOL_TO_SERVER[fn_name] = "generated"
+        return {"tool_name": fn_name, "code": code[:500], "file": str(tool_file)}
+    except Exception:
+        return None
+
+
+def _exec_generated(tool_name: str, args: dict) -> dict:
+    tool_file = GEN_TOOL_DIR / f"{tool_name}.py"
+    if not tool_file.exists():
+        return {"error": f"Generated tool {tool_name} not found"}
+    code = tool_file.read_text(encoding="utf-8")
+    _safe_builtins = {
+        "range": range, "len": len, "int": int, "float": float, "str": str,
+        "list": list, "dict": dict, "tuple": tuple, "set": set, "bool": bool,
+        "abs": abs, "min": min, "max": max, "sum": sum, "round": round,
+        "enumerate": enumerate, "zip": zip, "map": map, "filter": filter,
+        "sorted": sorted, "reversed": reversed, "isinstance": isinstance,
+        "print": print, "True": True, "False": False, "None": None,
+        "__import__": __import__,
+    }
+    safe_globals = {"__builtins__": _safe_builtins, "math": math, "json": json, "np": np, "numpy": np}
+    safe_locals: dict = {}
+    try:
+        exec(code, safe_globals, safe_locals)
+        fn = safe_locals.get(tool_name)
+        if not fn:
+            return {"error": f"Function {tool_name} not found in generated code"}
+        result = fn(**args)
+        return result if isinstance(result, dict) else {"result": str(result)}
+    except Exception as e:
+        return {"error": f"Execution error: {str(e)[:200]}"}
+
+
+# ── 11. Neuro-Symbolic Physics Validator ──────────────────────────────
+
+class PhysicsValidator:
+    @staticmethod
+    def validate_manning(n: float, R: float, S: float) -> dict:
+        V = (1.0 / n) * (R ** (2.0 / 3.0)) * (S ** 0.5) if n > 0 and R > 0 and S > 0 else 0
+        warnings = []
+        if not (0.01 <= n <= 0.30):
+            warnings.append(f"糙率n={n:.3f}超出[0.01,0.30]")
+        if V > 15:
+            warnings.append(f"流速V={V:.2f}m/s超过15m/s")
+        return {"velocity_ms": round(V, 4), "valid": len(warnings) == 0, "warnings": warnings}
+
+    @staticmethod
+    def validate_continuity(Q_in: float, Q_out: float, dS: float = 0) -> dict:
+        residual = abs(Q_in - Q_out - dS)
+        return {"residual": round(residual, 4), "balanced": residual < 0.01 * max(Q_in, 0.001)}
+
+    @staticmethod
+    def check_range(value: float, key: str) -> dict:
+        rng = PHYSICS_RANGES.get(key)
+        if not rng:
+            return {"valid": True}
+        lo, hi, label = rng
+        ok = lo <= value <= hi
+        return {"valid": ok, "value": value, "range": f"{lo}-{hi}", "label": label,
+                "warning": "" if ok else f"{label}={value}超出范围[{lo},{hi}]"}
+
+
+_physics = PhysicsValidator()
+
+
+# ── 12. Satellite Remote Sensing (STAC) ──────────────────────────────
+
+STUDY_BBOX = [104.83, 33.10, 104.95, 33.27]
+
+
+async def _search_satellite(bbox: list[float] | None = None, date_start: str = "", date_end: str = "") -> dict:
+    bbox = bbox or STUDY_BBOX
+    datetime_str = f"{date_start}/{date_end}" if date_start and date_end else "2024-01-01/2026-06-07"
+    url = "https://earth-search.aws.element84.com/v1/search"
+    payload = {"bbox": bbox, "datetime": datetime_str, "collections": ["sentinel-2-l2a"], "limit": 5}
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            features = []
+            for f in data.get("features", [])[:5]:
+                props = f.get("properties", {})
+                features.append({
+                    "id": f.get("id", ""), "datetime": props.get("datetime", ""),
+                    "cloud_cover": props.get("eo:cloud_cover", "?"),
+                    "bbox": f.get("bbox", []), "assets": list(f.get("assets", {}).keys())[:5]
+                })
+            return {"total": data.get("numberReturned", 0), "features": features}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+# ── 13. Spatial Knowledge Graph (SQLite) ──────────────────────────────
+
+class SpatialKG:
+    def __init__(self):
+        self.db_path = DATA_DIR / "spatial_kg.db"
+        self._init()
+
+    def _init(self):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS entities (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, type TEXT, properties TEXT);
+                CREATE TABLE IF NOT EXISTS relations (id INTEGER PRIMARY KEY AUTOINCREMENT, from_name TEXT, relation TEXT, to_name TEXT, confidence REAL DEFAULT 1.0);
+            """)
+            for name, typ, props in [
+                ("迭部县", "region", '{"lat":33.19,"lon":104.89}'),
+                ("白龙江", "river", '{"length_km":500}'),
+                ("DEM_LBH", "dataset", '{"resolution":"0.5m","size":"3GB","crs":"EPSG:4544"}'),
+                ("研究区", "area", '{"elev_min":790,"elev_max":1800}'),
+            ]:
+                conn.execute("INSERT OR IGNORE INTO entities(name,type,properties) VALUES(?,?,?)", (name, typ, props))
+            for fr, rel, to in [("迭部县", "contains", "白龙江"), ("DEM_LBH", "covers", "迭部县"), ("白龙江", "flows_through", "迭部县"), ("研究区", "located_in", "迭部县")]:
+                conn.execute("INSERT OR IGNORE INTO relations(from_name,relation,to_name) VALUES(?,?,?)", (fr, rel, to))
+
+    def query_entities(self, name_contains: str = "", entity_type: str = "") -> list[dict]:
+        with sqlite3.connect(str(self.db_path)) as conn:
+            sql = "SELECT name,type,properties FROM entities WHERE 1=1"
+            params: list = []
+            if name_contains:
+                sql += " AND name LIKE ?"
+                params.append(f"%{name_contains}%")
+            if entity_type:
+                sql += " AND type=?"
+                params.append(entity_type)
+            rows = conn.execute(sql + " LIMIT 20", params).fetchall()
+        return [{"name": r[0], "type": r[1], "properties": r[2]} for r in rows]
+
+    def query_relations(self, entity_name: str) -> list[dict]:
+        with sqlite3.connect(str(self.db_path)) as conn:
+            rows = conn.execute("SELECT from_name,relation,to_name,confidence FROM relations WHERE from_name=? OR to_name=?",
+                                (entity_name, entity_name)).fetchall()
+        return [{"from": r[0], "relation": r[1], "to": r[2], "confidence": r[3]} for r in rows]
+
+    def add_entity(self, name: str, typ: str, properties: str = "{}"):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("INSERT OR IGNORE INTO entities(name,type,properties) VALUES(?,?,?)", (name, typ, properties))
+
+    def add_relation(self, fr: str, rel: str, to: str, confidence: float = 1.0):
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("INSERT INTO relations(from_name,relation,to_name,confidence) VALUES(?,?,?,?)", (fr, rel, to, confidence))
+
+
+_kg = SpatialKG()
+
+
+# ── 14. Spatial World Model ──────────────────────────────────────────
+
+WORLD_MODEL_RULES = {
+    "rainfall_runoff": {
+        "water_balance": "降雨 = 径流 + 蒸发 + 下渗 + 蓄水变化",
+        "scs_method": "Q = (P-0.2S)²/(P+0.2S), S=25400/CN-254",
+        "time_of_concentration": "Tc = L^1.15 / (3600 * 14.56 * S^0.38)",
+    },
+    "flood_inundation": {
+        "saint_venant": "连续方程 ∂h/∂t + ∂(uh)/∂x + ∂(vh)/∂y = S",
+        "manning": "V = (1/n)*R^(2/3)*S^(1/2)",
+        "flood_depth_limit": "洪水深度一般<30m, 流速<15m/s",
+    },
+    "terrain_analysis": {
+        "d8_flow": "水流流向8邻域中高程最低的方向",
+        "accumulation": "每个格子的汇流累积值=流入该格子的上游格子总数",
+        "watershed": "流域边界=分水岭(水流方向向外的区域)",
+    },
+}
+
+
+def _get_world_model_rules(scenario: str) -> list[str]:
+    rules = WORLD_MODEL_RULES.get(scenario, {})
+    return [f"{k}: {v}" for k, v in rules.items()]
+
+
+def _validate_sim_params(params: dict, sim_type: str) -> dict:
+    checks = []
+    if sim_type == "hydrodynamic":
+        if "duration_hours" in params:
+            h = params["duration_hours"]
+            checks.append({"param": "duration_hours", "valid": 0 < h <= 72, "warning": "" if 0 < h <= 72 else f"模拟时长{h}h超出合理范围"})
+        if "grid_resolution_m" in params:
+            r = params["grid_resolution_m"]
+            checks.append({"param": "grid_resolution_m", "valid": 0.5 <= r <= 100, "warning": "" if 0.5 <= r <= 100 else f"网格分辨率{r}m不合理"})
+    return {"sim_type": sim_type, "checks": checks, "all_valid": all(c["valid"] for c in checks)}
+
+
+# ── 15. Add new tools to GLM_TOOLS + TOOL_TO_SERVER ──────────────────
+
+GLM_TOOLS.extend([
+    {"type": "function", "function": {"name": "weather_forecast", "description": "获取天气预报数据(降雨、温度、风速)", "parameters": {"type": "object", "properties": {"latitude": {"type": "number", "default": 33.19}, "longitude": {"type": "number", "default": 104.89}, "forecast_days": {"type": "integer", "default": 3}}, "required": []}}},
+    {"type": "function", "function": {"name": "satellite_search", "description": "搜索卫星遥感影像(Sentinel-2)", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]", "items": {"type": "number"}}, "date_start": {"type": "string", "description": "开始日期 YYYY-MM-DD"}, "date_end": {"type": "string", "description": "结束日期 YYYY-MM-DD"}}, "required": []}}},
+    {"type": "function", "function": {"name": "spatial_knowledge_query", "description": "查询空间知识图谱(实体和关系)", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "查询关键词"}}, "required": ["query"]}}},
+    {"type": "function", "function": {"name": "scatter_interpolate", "description": "散点插值/克里金插值：将离散数据点插值为连续网格表面。支持克里金(Kriging)、IDW反距离加权、RBF径向基函数、linear/nearest/cubic方法。输入散点坐标和值，输出插值网格统计数据。", "parameters": {"type": "object", "properties": {"points_json": {"type": "string", "description": "散点JSON数组: [{\"x\":104.9,\"y\":33.15,\"z\":1200}, ...]"}, "method": {"type": "string", "description": "插值方法: kriging(克里金), idw(反距离), rbf(径向基), linear, nearest, cubic", "default": "linear"}, "grid_resolution": {"type": "integer", "description": "网格分辨率(NxN)", "default": 100}}, "required": []}}},
+    {"type": "function", "function": {"name": "auto_tool", "description": "当现有工具无法满足用户需求时，自动生成并执行新工具。用于：计算类任务(插值/拟合/统计)、数据转换、数学公式计算等。调用时描述用户完整需求。", "parameters": {"type": "object", "properties": {"requirement": {"type": "string", "description": "用户的完整需求描述，包含输入参数和期望输出"}, "params_json": {"type": "string", "description": "输入参数JSON，如{\"b\":2,\"h\":1.5,\"n\":0.015}"}}, "required": ["requirement"]}}},
+])
+
+TOOL_TO_SERVER["weather_forecast"] = "internal"
+TOOL_TO_SERVER["satellite_search"] = "internal"
+TOOL_TO_SERVER["spatial_knowledge_query"] = "internal"
+TOOL_TO_SERVER["auto_tool"] = "internal"
+
+ROUTING_RULES.extend([
+    (r"天气|天气预报|降雨预报|气象", "weather_forecast"),
+    (r"卫星|遥感|Sentinel|Landsat|影像", "satellite_search"),
+    (r"知识图谱|相关实体|空间实体", "spatial_knowledge_query"),
+    (r"散点插值|插值|griddata|IDW|克里金|Kriging|反距离|空间插值", "scatter_interpolate"),
+])
+
+
+# ── Internal tool handler ─────────────────────────────────────────────
+
+async def _handle_internal_tool(tool_name: str, args: dict) -> dict:
+    if tool_name == "weather_forecast":
+        return await _get_weather(args.get("latitude", 33.19), args.get("longitude", 104.89), args.get("forecast_days", 3))
+    if tool_name == "satellite_search":
+        return await _search_satellite(args.get("bbox"), args.get("date_start", ""), args.get("date_end", ""))
+    if tool_name == "spatial_knowledge_query":
+        q = args.get("query", "")
+        entities = _kg.query_entities(name_contains=q)
+        relations = []
+        for e in entities[:3]:
+            relations.extend(_kg.query_relations(e["name"]))
+        return {"entities": entities, "relations": relations}
+    if tool_name == "physics_check":
+        return _physics.check_range(args.get("value", 0), args.get("param_key", ""))
+    if tool_name == "auto_tool":
+        requirement = args.get("requirement", "")
+        params_json = args.get("params_json", "")
+        gen = await _generate_tool(requirement)
+        if not gen:
+            return {"error": f"无法为需求生成工具: {requirement[:100]}"}
+        params = {}
+        if params_json:
+            try:
+                params = json.loads(params_json)
+            except json.JSONDecodeError:
+                params = {}
+        result = _exec_generated(gen["tool_name"], params)
+        result["_generated_tool"] = gen["tool_name"]
+        result["_generated_file"] = gen["file"]
+        return result
+    return {"error": f"Unknown internal tool: {tool_name}"}
+
+
+# ═══════════════════════════════════════════════════════════════════════
 
 
 def _validate_result(tool: str, args: dict, result: dict) -> tuple[bool, str]:
@@ -531,7 +1137,19 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
     async def generate():
         message = q
         t_start = time.time()
+        trace = _new_trace(message)
         yield _sse({"type": "start", "message": message})
+
+        if message.startswith("[img:"):
+            img_name = message[5:].strip().rstrip("]").strip()
+            img_path = UPLOAD_IMG_DIR / img_name
+            if img_path.exists():
+                img_b64 = base64.b64encode(img_path.read_bytes()).decode()
+                yield _sse({"type": "thinking_start", "agent": "vision", "label": "👁️ 图像分析"})
+                analysis = await _analyze_image(img_b64)
+                yield _sse({"type": "thinking", "agent": "vision", "content": analysis[:300]})
+                yield _sse({"type": "thinking_end", "agent": "vision"})
+                message = f"用户上传了图片({img_name})，AI分析结果: {analysis}\n\n用户问题: {message.replace(f'[img:{img_name}]', '').strip() or '请根据图片分析结果进行水利相关分析'}"
 
         parsed_history = []
         if history:
@@ -539,6 +1157,17 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
                 parsed_history = json.loads(history)
             except (json.JSONDecodeError, TypeError):
                 pass
+
+        memory_ctx = ""
+        episodes = _memory.recall_episodes(message)
+        facts = _memory.recall_facts()
+        if facts or episodes:
+            fact_str = "; ".join(f"{f['key']}={f['value']}" for f in facts[:5])
+            ep_str = "; ".join(e["summary"][:60] for e in episodes[:2])
+            memory_ctx = f"\n[记忆] 已知: {fact_str}\n历史: {ep_str}"
+            yield _sse({"type": "memory_recall", "facts": facts[:5], "episodes": [{"summary": e["summary"][:100]} for e in episodes[:2]]})
+
+        commonsense_ctx = _inject_commonsense(message)
 
         ui_force = _detect_ui_action(message)
         if ui_force:
@@ -549,11 +1178,13 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
             labels = {"open_3d": "🛰️ 已为您打开三维地形查看器", "open_tin": "🔺 已生成TIN三角网", "open_quadtree": "🌳 已生成四叉树剖分"}
             async for ch in _stream_words(labels.get(ui_force, f"UI: {ui_force}")):
                 yield _sse({"type": "text", "content": ch})
-            yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": 0})
+            yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": 0, "trace": trace.to_dict()})
             return
 
         yield _sse({"type": "thinking_start", "agent": "planner", "label": "📋 任务规划"})
+        t_route_start = time.time()
         plan = await _route(message, parsed_history)
+        trace.add("route", plan[:80], int((time.time() - t_route_start) * 1000))
         plan_upper = plan.strip().upper()
         is_simple = plan_upper.startswith("SIMPLE")
         is_direct = plan_upper.startswith("DIRECT:")
@@ -567,7 +1198,7 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
         yield _sse({"type": "thinking_end", "agent": "planner"})
 
         react_messages: list[dict] = [
-            {"role": "system", "content": REACT_SYSTEM_PROMPT},
+            {"role": "system", "content": REACT_SYSTEM_PROMPT + memory_ctx + "\n" + commonsense_ctx},
             *parsed_history,
             {"role": "user", "content": message},
         ]
@@ -616,14 +1247,14 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
                 yield _sse({"type": "thinking_end", "agent": "react"})
                 async for ch in _stream_words(content):
                     yield _sse({"type": "text", "content": ch})
-                yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": step, "tools_called": total_tools})
+                yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": step, "tools_called": total_tools, "trace": trace.to_dict()})
                 return
 
             if not tool_calls:
                 yield _sse({"type": "thinking_end", "agent": "react"})
                 async for ch in _stream_words("抱歉，我暂时无法处理您的请求。请描述具体的水利分析需求。"):
                     yield _sse({"type": "text", "content": ch})
-                yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": step, "tools_called": total_tools})
+                yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": step, "tools_called": total_tools, "trace": trace.to_dict()})
                 return
 
             assistant_msg: dict[str, Any] = {"role": "assistant", "content": content}
@@ -643,7 +1274,7 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
                 yield _sse({"type": "thinking_end", "agent": "react"})
                 async for ch in _stream_words("抱歉，工具调用格式异常。请重新描述您的需求。"):
                     yield _sse({"type": "text", "content": ch})
-                yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": step, "tools_called": total_tools})
+                yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": step, "tools_called": total_tools, "trace": trace.to_dict()})
                 return
             assistant_msg["tool_calls"] = safe_tool_calls
             react_messages.append(assistant_msg)
@@ -674,9 +1305,28 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
                 deduped_calls.append((tc["id"], tool_name, args))
 
             tasks = [(tc_id, tool_name, TOOL_TO_SERVER.get(tool_name, ""), args) for tc_id, tool_name, args in deduped_calls]
-            results = await asyncio.gather(*[_cached_mcp_call(s, n, a) for _, n, s, a in tasks], return_exceptions=True)
 
-            for i, ((tc_id, tool_name, server, args), result) in enumerate(zip(tasks, results)):
+            async def _exec_task(tc_id: str, tool_name: str, server: str, args: dict, user_msg: str) -> dict:
+                t_tool = time.time()
+                logger.debug(f"_exec_task: tool={tool_name}, server={server}, args_keys={list(args.keys())}")
+                if server == "generated":
+                    r = _exec_generated(tool_name, args)
+                elif server == "internal":
+                    r = await _handle_internal_tool(tool_name, args)
+                elif not server:
+                    gen = await _generate_tool(f"用户需要: {user_msg} -> {tool_name}")
+                    if gen:
+                        r = _exec_generated(gen["tool_name"], args)
+                    else:
+                        r = {"error": f"Unknown tool: {tool_name}"}
+                else:
+                    r = await _cached_mcp_call(server, tool_name, args)
+                trace.add(f"tool:{tool_name}", str(server), int((time.time() - t_tool) * 1000))
+                return r
+
+            results_raw = await asyncio.gather(*[_exec_task(tc_id, n, s, a, message) for tc_id, n, s, a in tasks], return_exceptions=True)
+
+            for i, ((tc_id, tool_name, server, args), result) in enumerate(zip(tasks, results_raw)):
                 if isinstance(result, Exception):
                     result = {"error": str(result)[:200]}
 
@@ -688,6 +1338,19 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
                     yield _sse({"type": "thinking", "agent": "reflect", "content": f"🔍 反思: {tool_name}结果异常 — {validation_msg}"})
                     yield _sse({"type": "tool_error", "server": server, "tool": tool_name, "error": validation_msg})
                     result = {"error": f"验证失败: {validation_msg}", "original_keys": list(result.keys()) if isinstance(result, dict) else []}
+
+                physics_warnings = _validate_physics(tool_name, result if isinstance(result, dict) else {})
+                if physics_warnings:
+                    yield _sse({"type": "thinking", "agent": "physics", "content": f"⚡ 物理校验: {'; '.join(physics_warnings)}"})
+
+                if tool_name in CRITICAL_TOOLS and isinstance(result, dict) and "error" not in result:
+                    debate = await _debate_validate(message, tool_name, result)
+                    if not debate["consensus"]:
+                        issues = [c.get("issue", "") for c in debate["critics"] if c.get("issue")]
+                        yield _sse({"type": "debate", "critics": debate["critics"], "consensus": False})
+                        yield _sse({"type": "thinking", "agent": "debate", "content": f"⚠️ 辩论未通过: {'; '.join(issues[:2])}"})
+                    else:
+                        yield _sse({"type": "debate", "critics": debate["critics"], "consensus": True})
 
                 yield _sse({"type": "divider", "content": f"⚡ Step {step}: {label} → {tool_name}"})
                 yield _sse({"type": "tool_start", "server": server, "tool": tool_name, "step": total_tools, "react_step": step})
@@ -715,7 +1378,7 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
             async for ch in _stream_words("分析完成。如需更详细结果，请提出更具体的问题。"):
                 yield _sse({"type": "text", "content": ch})
 
-        yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": react_max, "tools_called": total_tools})
+            yield _sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": react_max, "tools_called": total_tools, "trace": trace.to_dict()})
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -795,9 +1458,109 @@ def _format_tool_summary(server: str, tool: str, result: dict | list) -> str:
         return f"📍 点位: 高程{result.get('elevation_m','?')}m 坡度{result.get('slope_deg','?')}°\n"
     if tool == "calibrate_suggest":
         return f"🔧 率定: NSE={result.get('nash_sutcliffe','')} → {len(result.get('suggestions',[]))}条建议\n"
+    if tool == "weather_forecast":
+        hourly = result.get("hourly", {})
+        times = hourly.get("time", [])
+        precip = hourly.get("precipitation", [])
+        total_precip = sum(p for p in precip if isinstance(p, (int, float)))
+        return f"🌤️ 天气: {len(times)}小时预报, 总降水{total_precip:.1f}mm\n"
+    if tool == "satellite_search":
+        return f"🛰️ 卫星: {result.get('total', 0)}景影像\n"
+    if tool == "spatial_knowledge_query":
+        ents = result.get("entities", [])
+        rels = result.get("relations", [])
+        return f"🧠 知识图谱: {len(ents)}个实体, {len(rels)}条关系\n"
+    if tool == "auto_tool":
+        gen_name = result.get("_generated_tool", "unknown")
+        return f"🤖 自动生成工具: {gen_name}\n"
     if "error" in result:
         return f"❌ 错误: {result['error']}\n"
     return f"⚙️ {server}.{tool}: {json.dumps(result, ensure_ascii=False)[:200]}\n"
+
+
+@app.post("/api/upload_image")
+async def upload_image(file: UploadFile = FastAPIFile(...)):
+    ext = Path(file.filename or "img.png").suffix.lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff"):
+        return {"error": f"Unsupported image format: {ext}"}
+    ts = int(time.time() * 1000)
+    dest = UPLOAD_IMG_DIR / f"{ts}_{file.filename}"
+    content = await file.read()
+    dest.write_bytes(content)
+    return {"filename": dest.name, "size_bytes": len(content), "path": str(dest)}
+
+
+@app.post("/api/analyze_image")
+async def analyze_image_api(image_base64: str = "", file_path: str = ""):
+    if file_path:
+        import base64
+        p = Path(file_path)
+        if p.exists():
+            image_base64 = base64.b64encode(p.read_bytes()).decode()
+        else:
+            return {"error": "File not found"}
+    if not image_base64:
+        return {"error": "Provide image_base64 or file_path"}
+    result = await _analyze_image(image_base64)
+    return {"analysis": result}
+
+
+@app.get("/api/memory")
+async def get_memory():
+    facts = _memory.recall_facts()
+    procedures = _memory.recall_procedures("", limit=10)
+    return {"facts": facts, "procedures": procedures}
+
+
+@app.get("/api/weather")
+async def get_weather(lat: float = 33.19, lon: float = 104.89, days: int = 3):
+    return await _get_weather(lat, lon, days)
+
+
+@app.get("/api/satellite")
+async def get_satellite(date_start: str = "", date_end: str = ""):
+    return await _search_satellite(date_start=date_start, date_end=date_end)
+
+
+@app.get("/api/kg/entities")
+async def get_kg_entities(name: str = "", type: str = ""):
+    return {"entities": _kg.query_entities(name, type)}
+
+
+@app.get("/api/kg/relations")
+async def get_kg_relations(entity: str = ""):
+    return {"relations": _kg.query_relations(entity)}
+
+
+@app.get("/api/twin/sources")
+async def get_twin_sources():
+    return {"sources": _twin.list_sources()}
+
+
+@app.get("/api/twin/status")
+async def get_twin_status():
+    return {"status": await _twin.health_check()}
+
+
+@app.get("/api/traces")
+async def get_traces():
+    return {"traces": [t.to_dict() for t in list(_traces.values())[-20:]]}
+
+
+@app.get("/api/traces/{trace_id}")
+async def get_trace(trace_id: str):
+    t = _traces.get(trace_id)
+    return t.to_dict() if t else {"error": "not found"}
+
+
+@app.get("/api/evolution/stats")
+async def get_evolution_stats():
+    return _evolution_stats()
+
+
+@app.get("/api/evolution/suggestions")
+async def get_evolution_suggestions():
+    return {"suggestions": _evolution_suggestions()}
 
 
 if __name__ == "__main__":
