@@ -1105,7 +1105,163 @@ TOOLS = [
     Tool(name="quadtree_subdivide", description="Quadtree adaptive subdivision of DEM based on elevation variance", inputSchema={"type": "object", "properties": {"lng_min": {"type": "number", "default": 0}, "lng_max": {"type": "number", "default": 0}, "lat_min": {"type": "number", "default": 0}, "lat_max": {"type": "number", "default": 0}, "max_depth": {"type": "integer", "default": 4}, "variance_threshold": {"type": "number", "default": 50.0}}, "required": []}),
 ]
 
-HANDLERS = {"dem_analyze": dem_analyze, "flow_accumulation": flow_accumulation, "watershed_delineate": watershed_delineate, "terrain_profile": terrain_profile, "dem_render": dem_render, "point_query": point_query, "tin_generate": tin_generate, "quadtree_subdivide": quadtree_subdivide}
+
+async def scatter_interpolate(
+    points_json: str = "",
+    method: str = "linear",
+    grid_resolution: int = 100,
+    bbox: str = "",
+    dem_path: str = "",
+):
+    import numpy as np
+    from scipy.interpolate import griddata as scipy_griddata
+
+    if points_json:
+        try:
+            pts_data = json.loads(points_json)
+        except json.JSONDecodeError:
+            return {"error": "points_json格式错误，需要JSON数组: [{\"x\":...,\"y\":...,\"z\":...}, ...]"}
+        if not isinstance(pts_data, list) or len(pts_data) < 3:
+            return {"error": "至少需要3个散点数据"}
+        points = np.array([[p.get("x", p.get("lng", 0)), p.get("y", p.get("lat", 0))] for p in pts_data])
+        values = np.array([p.get("z", p.get("value", p.get("elevation", 0))) for p in pts_data])
+    elif dem_path or REAL_DEM.exists():
+        path = _find_dem(dem_path)
+        if not path:
+            return {"error": "无DEM数据"}
+        import rasterio
+        with rasterio.open(path) as ds:
+            win = _sample_window(ds, 400)
+            data = ds.read(1, window=win)
+            nodata = ds.nodata if ds.nodata else -9999
+            data[data == nodata] = np.nan
+            h, w = data.shape
+            transform = ds.window_transform(win)
+            xs = np.arange(w)
+            ys = np.arange(h)
+            xx, yy = np.meshgrid(xs, ys)
+            valid = ~np.isnan(data)
+            n_sample = min(2000, valid.sum())
+            idx = np.random.choice(valid.sum(), n_sample, replace=False)
+            vy, vx = np.where(valid)
+            points = np.column_stack([vx[idx], vy[idx]])
+            values = data[vy[idx], vx[idx]]
+    else:
+        return {"error": "需要提供points_json或DEM数据"}
+
+    x_min, x_max = points[:, 0].min(), points[:, 0].max()
+    y_min, y_max = points[:, 1].min(), points[:, 1].max()
+    margin_x = (x_max - x_min) * 0.05
+    margin_y = (y_max - y_min) * 0.05
+
+    grid_x, grid_y = np.mgrid[
+        (x_min - margin_x):(x_max + margin_x):complex(grid_resolution),
+        (y_min - margin_y):(y_max + margin_y):complex(grid_resolution)
+    ]
+
+    actual_method = method
+    method_lower = method.lower()
+
+    if method_lower in ("linear", "nearest", "cubic"):
+        grid_z = scipy_griddata(points, values, (grid_x, grid_y), method=method_lower)
+    elif method_lower in ("kriging", "ordinary_kriging", "ok"):
+        try:
+            from pykrige.ok import OrdinaryKriging
+            ok = OrdinaryKriging(points[:, 0], points[:, 1], values, variogram_model="linear")
+            grid_z, _ = ok.execute("grid", grid_x[:, 0], grid_y[0, :])
+        except ImportError:
+            from scipy.interpolate import Rbf
+            rbf = Rbf(points[:, 0], points[:, 1], values, function="gaussian")
+            grid_z = rbf(grid_x, grid_y)
+            actual_method = "kriging(RBF-gaussian近似)"
+    elif method_lower in ("idw", "inverse_distance"):
+        from scipy.spatial import cKDTree
+        tree = cKDTree(points)
+        grid_flat = np.column_stack([grid_x.ravel(), grid_y.ravel()])
+        dists, idxs = tree.query(grid_flat, k=min(12, len(points)))
+        dists = np.maximum(dists, 1e-10)
+        weights = 1.0 / dists ** 2
+        weights /= weights.sum(axis=1, keepdims=True)
+        grid_z = np.sum(values[idxs] * weights, axis=1).reshape(grid_x.shape)
+        actual_method = "IDW(k=12,p=2)"
+    elif method_lower in ("rbf", "rbf_interpolation"):
+        from scipy.interpolate import Rbf
+        rbf = Rbf(points[:, 0], points[:, 1], values, function="multiquadric")
+        grid_z = rbf(grid_x, grid_y)
+        actual_method = "RBF(multiquadric)"
+    else:
+        grid_z = scipy_griddata(points, values, (grid_x, grid_y), method="linear")
+        actual_method = "linear(fallback)"
+
+    n_rows, n_cols = grid_z.shape
+    step_r = max(1, n_rows // 50)
+    step_c = max(1, n_cols // 50)
+    grid_preview = np.where(np.isnan(grid_z), None, grid_z)[::step_r, ::step_c].tolist()
+
+    stats = {
+        "input_points": len(points),
+        "method": actual_method,
+        "grid_resolution": f"{grid_resolution}x{grid_resolution}",
+        "valid_cells": int((~np.isnan(grid_z)).sum()),
+        "total_cells": grid_z.size,
+        "z_min": float(np.nanmin(grid_z)) if not np.all(np.isnan(grid_z)) else None,
+        "z_max": float(np.nanmax(grid_z)) if not np.all(np.isnan(grid_z)) else None,
+        "z_mean": float(np.nanmean(grid_z)) if not np.all(np.isnan(grid_z)) else None,
+        "x_range": [float(x_min), float(x_max)],
+        "y_range": [float(y_min), float(y_max)],
+        "grid_preview": grid_preview,
+        "grid_shape": [n_rows, n_cols],
+    }
+    try:
+        import base64, struct
+        z_norm = grid_z.copy()
+        z_min_v, z_max_v = np.nanmin(z_norm), np.nanmax(z_norm)
+        z_range = z_max_v - z_min_v if z_max_v > z_min_v else 1.0
+        z_norm = (z_norm - z_min_v) / z_range
+        z_norm = np.nan_to_num(z_norm, nan=0.0)
+        h, w = z_norm.shape
+        header = struct.pack("<2BIHHB", 1, 3, w, h, 0, 8)
+        pixels = bytearray()
+        colormap = [
+            (10, 20, 60), (20, 40, 100), (0, 100, 180), (0, 180, 220),
+            (0, 220, 160), (100, 240, 80), (200, 240, 40), (255, 200, 0),
+            (255, 140, 0), (255, 60, 0), (180, 0, 0),
+        ]
+        for r in range(h):
+            for c in range(w):
+                v = z_norm[r, c]
+                idx = min(int(v * (len(colormap) - 1)), len(colormap) - 1)
+                R, G, B = colormap[idx]
+                pixels.extend([R, G, B, 255])
+        raw = header + bytes(pixels)
+        import zlib
+        compressed = zlib.compress(raw, 9)
+        sig = b"\x89PNG\r\n\x1a\n"
+        def _png_chunk(ctype, data):
+            c = ctype + data
+            return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c) & 0xFFFFFFFF)
+        ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
+        png_data = sig + _png_chunk(b"IHDR", ihdr) + _png_chunk(b"IDAT", compressed) + _png_chunk(b"IEND", b"")
+        stats["image_base64"] = base64.b64encode(png_data).decode("ascii")
+        stats["bounds"] = [float(y_min - margin_y), float(x_min - margin_x), float(y_max + margin_y), float(x_max + margin_x)]
+    except Exception:
+        pass
+    return stats
+
+
+TOOLS = [
+    Tool(name="dem_analyze", description="Analyze DEM terrain: slope, aspect, flow direction, statistics. Uses real DEM if available.", inputSchema={"type": "object", "properties": {"dem_path": {"type": "string", "default": ""}, "cell_size_m": {"type": "number", "default": 0}, "compute_slope": {"type": "boolean", "default": True}, "compute_aspect": {"type": "boolean", "default": True}, "compute_flowdir": {"type": "boolean", "default": True}}, "required": []}),
+    Tool(name="flow_accumulation", description="Compute flow accumulation and extract stream network from DEM", inputSchema={"type": "object", "properties": {"dem_path": {"type": "string", "default": ""}, "threshold_cells": {"type": "integer", "default": 100}}, "required": []}),
+    Tool(name="watershed_delineate", description="Delineate watershed boundary from outlet point using real DEM", inputSchema={"type": "object", "properties": {"outlet_x": {"type": "number", "default": 0}, "outlet_y": {"type": "number", "default": 0}, "snap_distance_m": {"type": "number", "default": 50}}, "required": []}),
+    Tool(name="terrain_profile", description="Generate terrain elevation profile between two points using real DEM", inputSchema={"type": "object", "properties": {"start_x": {"type": "number", "default": 0}, "start_y": {"type": "number", "default": 0}, "end_x": {"type": "number", "default": 0}, "end_y": {"type": "number", "default": 0}, "n_points": {"type": "integer", "default": 30}}, "required": []}),
+    Tool(name="dem_render", description="Render DEM as hillshade image overlay and contour lines on map", inputSchema={"type": "object", "properties": {"dem_path": {"type": "string", "default": ""}, "contour_interval": {"type": "number", "default": 20}}, "required": []}),
+    Tool(name="point_query", description="Spatial intelligence point query: get elevation, slope, aspect, curvature, TPI, TRI and terrain classification at a point", inputSchema={"type": "object", "properties": {"lng": {"type": "number", "default": 0}, "lat": {"type": "number", "default": 0}, "search_radius_m": {"type": "number", "default": 500}}, "required": []}),
+    Tool(name="tin_generate", description="Generate TIN (Triangulated Irregular Network) from DEM with slope-adaptive refinement or fixed spacing", inputSchema={"type": "object", "properties": {"lng_min": {"type": "number", "default": 0}, "lng_max": {"type": "number", "default": 0}, "lat_min": {"type": "number", "default": 0}, "lat_max": {"type": "number", "default": 0}, "max_points": {"type": "integer", "default": 1500}, "refine_steep": {"type": "boolean", "default": True}, "spacing_m": {"type": "number", "default": 0, "description": "Fixed grid spacing in meters (e.g. 20 for 20m mesh). 0=auto by max_points"}}, "required": []}),
+    Tool(name="quadtree_subdivide", description="Quadtree adaptive subdivision of DEM based on elevation variance", inputSchema={"type": "object", "properties": {"lng_min": {"type": "number", "default": 0}, "lng_max": {"type": "number", "default": 0}, "lat_min": {"type": "number", "default": 0}, "lat_max": {"type": "number", "default": 0}, "max_depth": {"type": "integer", "default": 4}, "variance_threshold": {"type": "number", "default": 50.0}}, "required": []}),
+    Tool(name="scatter_interpolate", description="散点插值/克里金插值：将离散数据点插值为连续网格表面。支持克里金(Kriging)、IDW、RBF、linear/nearest/cubic方法。输入散点坐标和值，输出插值网格。", inputSchema={"type": "object", "properties": {"points_json": {"type": "string", "description": "JSON array of points: [{\"x\":104.9,\"y\":33.15,\"z\":1200}, ...]. x=lng, y=lat, z=value"}, "method": {"type": "string", "description": "插值方法: kriging(克里金), idw(反距离加权), rbf(径向基函数), linear, nearest, cubic", "default": "linear"}, "grid_resolution": {"type": "integer", "description": "网格分辨率(NxN)", "default": 100}, "dem_path": {"type": "string", "description": "DEM路径，用于采样散点(可选)", "default": ""}}, "required": []}),
+]
+
+HANDLERS = {"dem_analyze": dem_analyze, "flow_accumulation": flow_accumulation, "watershed_delineate": watershed_delineate, "terrain_profile": terrain_profile, "dem_render": dem_render, "point_query": point_query, "tin_generate": tin_generate, "quadtree_subdivide": quadtree_subdivide, "scatter_interpolate": scatter_interpolate}
 
 mcp_server = Server("mcp-raster")
 sse = SseServerTransport("/messages/")
@@ -1191,10 +1347,23 @@ async def heightmap(size: int = 256):
 
 @app.post("/call_tool")
 async def call_tool_http(body: dict[str, Any]):
-    handler = HANDLERS.get(body.get("name"))
+    name = body.get("name")
+    handler = HANDLERS.get(name)
     if not handler:
-        return {"error": f"Unknown tool: {body.get('name')}"}
-    return await handler(**body.get("arguments", {}))
+        return {"error": f"Unknown tool: {name}"}
+    args = body.get("arguments", {})
+    try:
+        return await handler(**args)
+    except TypeError as e:
+        import inspect
+        sig = inspect.signature(handler)
+        valid = {k: v for k, v in args.items() if k in sig.parameters}
+        try:
+            return await handler(**valid)
+        except Exception as e2:
+            return {"error": f"{type(e2).__name__}: {e2}"}
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
 
 
 app.router.add_api_route("/sse", sse.connect_sse, methods=["GET"])
