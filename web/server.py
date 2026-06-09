@@ -19,6 +19,7 @@ import httpx
 import numpy as np
 import structlog
 import uvicorn
+from scipy.spatial import Voronoi as _ScipyVoronoi
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,10 +32,10 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 logger = structlog.get_logger(__name__)
 
 ZHIPUAI_API_KEY = os.getenv("ZHIPUAI_API_KEY", "")
-GLM_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+GLM_API_URL = "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
 
-MODEL_FLASH = "glm-4-flash-250414"
-MODEL_AIR = "glm-4-air-250414"
+MODEL_FLASH = "GLM-5.1"
+MODEL_AIR = "GLM-5.1"
 
 CACHE_MAX = 200
 CACHE_TTL = 300
@@ -127,7 +128,17 @@ DEM数据位于甘肃迭部县(104.89°E, 33.19°N)，0.5m分辨率，3GB GeoTIF
 - 用户提到内涝/淹没/洪水/积水 → 必须调 flood_inundation_map
 - 用户问天气/降雨预报 → 调 weather_forecast
 - 用户问卫星/遥感影像 → 调 satellite_search
-- 没有现成工具的计算任务（插值/拟合/统计/公式/转换等）→ 调 auto_tool
+
+【关键规则 - auto_tool 兜底】
+以下场景必须调 auto_tool，绝对不能输出Python代码文本：
+- 计算/公式/求解/拟合/统计/矩阵/表格/曲线/图表
+- 生成/绘制/画 GeoJSON/多边形/线/图形
+- 水力计算(渠道/水深/流量/流速/曼宁/梯形/矩形)
+- 水文计算(单位线/演进/马斯京根/频率分析)
+- 任何需要写代码才能完成的任务
+- 找不到合适工具时 → auto_tool 是最终兜底
+
+绝对禁止：输出Python/代码块/代码示例。只能调工具。
 
 可以不调工具的场景：
 - 纯寒暄（你好/谢谢/再见）
@@ -136,7 +147,9 @@ DEM数据位于甘肃迭部县(104.89°E, 33.19°N)，0.5m分辨率，3GB GeoTIF
 - 复合任务需多步推理：先获取参数→再计算→最后评估
 - 参数从对话上下文提取实际值，不要编造
 - 工具返回错误时分析原因并调整参数重试
-- 回复专业、准确、有条理"""
+- 回复专业、准确、有条理
+- 关键：完成空间计算后（插值/模拟/地形分析/流域提取等），如果用户要求展示/渲染/出图，必须再调 render_map 将结果渲染到地图上
+- 关键：auto_tool生成工具执行成功后，如果结果包含空间数据，必须主动在回复中说明结果并引导用户查看"""
 
 
 def _sse(data: dict) -> str:
@@ -197,7 +210,7 @@ async def _call_llm(messages: list[dict], model: str = MODEL_FLASH, use_tools: b
         "model": model,
         "messages": messages,
         "temperature": 0.1,
-        "max_tokens": 1024,
+        "max_tokens": 4096,
     }
     if use_tools and GLM_TOOLS:
         payload["tools"] = GLM_TOOLS
@@ -217,34 +230,49 @@ async def _call_llm(messages: list[dict], model: str = MODEL_FLASH, use_tools: b
 SIMPLE_KEYWORDS = {"你好", "谢谢", "再见", "hello", "hi", "拜拜", "早上好", "晚上好", "谢谢啦", "哈喽"}
 
 ROUTING_RULES: list[tuple[str, str]] = [
-    (r"水动力|淹没模拟|洪水模拟|二维模拟|洪水演进", "hydrodynamic_2d_sim"),
-    (r"什么是|解释|介绍.*概念|原理是|怎么理解|什么是.*公式", "explain_concept"),
-    (r"糙率|曲线数|CN值|管材|水泵|海绵|排水标准|暴雨参数", "get_parameter"),
-    (r"河网|水流累积|汇流", "flow_accumulation"),
-    (r"流域|汇水|子流域", "watershed_delineate"),
-    (r"高程|坡度|查点|点位查询", "point_query"),
-    (r"剖面|断面", "terrain_profile"),
-    (r"地形分析|DEM分析|地形特征", "dem_analyze"),
-    (r"TIN|三角网|不规则三角", "tin_generate"),
-    (r"四叉树|自适应剖分|嵌套剖分", "quadtree_subdivide"),
-    (r"暴雨雨型|设计暴雨|暴雨强度", "design_storm"),
-    (r"径流|产流|汇流量", "runoff_compute"),
+    (r"水动力|淹没模拟|洪水模拟|二维模拟", "hydrodynamic_2d_sim"),
+    (r"什么是|解释|介绍.*概念|原理是|怎么理解", "explain_concept"),
+    (r"糙率|曲线数|CN值|管材|水泵|海绵|暴雨参数", "get_parameter"),
+    (r"河网提取|水流累积", "flow_accumulation"),
+    (r"流域提取|汇水区|子流域划分", "watershed_delineate"),
+    (r"高程查询|点位查询|查点高程", "point_query"),
+    (r"地形剖面|纵断面|横断面", "terrain_profile"),
+    (r"地形分析|DEM分析|DEM坡度", "dem_analyze"),
+    (r"TIN三角网|不规则三角|三角剖分", "tin_generate"),
+    (r"四叉树|自适应网格|嵌套剖分", "quadtree_subdivide"),
+    (r"暴雨雨型|设计暴雨|暴雨强度公式", "design_storm"),
+    (r"SCS.CN|径流系数|产汇流", "runoff_compute"),
     (r"淹没范围|淹没地图|淹没面积|淹没图|会不会被水淹|积水", "flood_inundation_map"),
-    (r"洪水风险|内涝评估|风险评估", "flood_assessment"),
-    (r"排水能力|排水评估|排水系统", "drainage_assessment"),
-    (r"洪水预警|预警|防汛预警", "flood_warning"),
-    (r"风险分区|风险等级|风险区域", "flood_risk_zones"),
-    (r"管网|SWMM|swmm|排水管网", "swmm_simulate"),
+    (r"洪水风险|内涝评估", "flood_assessment"),
+    (r"排水能力|排水评估", "drainage_assessment"),
+    (r"洪水预警|防汛预警", "flood_warning"),
+    (r"风险分区|风险等级", "flood_risk_zones"),
+    (r"SWMM|swmm|排水管网", "swmm_simulate"),
     (r"空间关系|相交|包含|相邻|空间查询", "spatial_query"),
-    (r"缓冲区|缓冲|周边范围", "buffer"),
+    (r"缓冲区|缓冲分析|周边范围", "buffer"),
     (r"叠加分析|交集|并集|差集", "overlay"),
-    (r"坐标转换|坐标系转换", "coordinate_transform"),
-    (r"搜索|查找资料|知识库", "search"),
-    (r"标准|规范|GB|SL|设计规范", "get_standard"),
+    (r"坐标转换|坐标系转换|EPSG", "coordinate_transform"),
+    (r"搜索.*资料|知识库查询", "search"),
+    (r"标准检索|查规范|GB\d|SL\d|设计规范", "get_standard"),
     (r"率定|校准|参数优化", "calibrate_suggest"),
     (r"DEM渲染|地形渲染", "dem_render"),
-    (r"克里金|Kriging|IDW|反距离权重|RBF插值|空间插值", "scatter_interpolate"),
+    (r"克里金|Kriging|IDW|反距离权重|RBF插值", "scatter_interpolate"),
+    (r"天气预报|降雨预报|气象预报", "weather_forecast"),
+    (r"卫星影像|遥感|Sentinel|Landsat", "satellite_search"),
+    (r"渲染地图|出图|绘制地图", "render_map"),
 ]
+
+_COMPUTE_FAST = re.compile(
+    r'计算|算[出法]|求解|拟合|统计[分分析]|'
+    r'生成.*[GeoJSON多边线图]|绘制.*[图线曲线]|画.*[图线]|'
+    r'矩阵|表格|曲线图|柱状图|对比曲线|过程图|'
+    r'单位线|演进|调洪|水力计算|水头损失|'
+    r'标准差|变异系数|偏态|峰态|频率分析|'
+    r'渔网|六边形|网格划分|风暴路径|随机游走|'
+    r'曼宁公式|海森威廉|试算法|'
+    r'流量.*水深|水深.*流量|流速.*流量',
+    re.IGNORECASE
+)
 
 _route_cache: dict[str, str] = {}
 _ROUTE_CACHE_MAX = 200
@@ -253,26 +281,39 @@ _ROUTE_CACHE_MAX = 200
 _ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool".split(",")
 
 _ROUTE_SYSTEM = """你是路由模块。只回复工具名或SIMPLE。
-水利专业(淹没/暴雨/径流/SWMM/洪水/排水)→对应工具
-地形/DEM/流域/河网→dem_analyze等
-空间(缓冲/叠加/坐标/几何)→buffer/overlay等
-插值(克里金/IDW/RBF)→scatter_interpolate
-渲染/出图→render_map
-其他(计算/生成/公式/数学/矩阵/图形/GeoJSON/工程)→auto_tool
-只回一个词。工具:""" + ",".join(_ALL_TOOLS)
+
+【最高优先级】以下类型必须路由到 auto_tool：
+- 计算/算/公式/求解/拟合/统计/矩阵/表格/曲线/图表/单位线/演进/水力/渠道/水深/流量/流速
+- 生成/绘制/画/创建(GeoJSON/多边形/线/图形/螺旋/网格/缓冲区环/河道)
+- 任何数学运算、数值计算、公式推导
+- 任何需要写代码才能完成的任务
+
+【次优先级】精确匹配时才用：
+- 淹没/积水→flood_inundation_map
+- 暴雨强度公式→design_storm
+- SWMM/管网→swmm_simulate
+- 克里金/IDW→scatter_interpolate
+- 缓冲区分析→buffer
+- DEM/地形/坡度→dem_analyze
+- 渲染地图→render_map
+
+不确定时→auto_tool
+只回一个工具名。可选:""" + ",".join(_ALL_TOOLS)
 
 
 async def _route(message: str, history: list[dict]) -> str:
     if any(kw in message.lower() for kw in SIMPLE_KEYWORDS):
         return "SIMPLE"
 
+    if _COMPUTE_FAST.search(message):
+        return "DIRECT:auto_tool"
+
     for pattern, tool in ROUTING_RULES:
         if re.search(pattern, message):
             return f"DIRECT:{tool}"
 
     cache_key = hashlib.md5(message.encode()).hexdigest()
-    if cache_key in _route_cache:
-        return _route_cache[cache_key]
+    _route_cache.pop(cache_key, None)
 
     messages = [{"role": "system", "content": _ROUTE_SYSTEM}, {"role": "user", "content": message}]
     try:
@@ -667,20 +708,23 @@ GEN_TOOL_DIR.mkdir(parents=True, exist_ok=True)
 
 async def _generate_tool(query: str) -> dict | None:
     messages = [
-        {"role": "system", "content": """为水利空间智能平台生成一个Python函数。函数名用英文compute_开头，参数用kwargs，返回dict。
-只输出代码，不要import，不要解释。
+        {"role": "system", "content": """为水利空间智能平台生成一个Python函数。
+严格规则：
+1. 函数签名必须是 def compute_xxx(**kwargs): 参数必须用**kwargs
+2. 函数内用 kwargs.get('参数名', 默认值) 读取参数，不要写死
+3. 必须完整实现算法，禁止"简化版""TODO""近似"
+4. geojson必须是Polygon/LineString，多边形坐标闭合
+5. 只输出代码，不要import，不要解释
 
-返回dict必须包含计算结果字段。如果结果适合可视化，加上对应字段：
-- GeoJSON: 加 "geojson": {"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point/Polygon/LineString","coordinates":...},"properties":{}}]}
-- 折线图/曲线: 加 "data_points": [{"x":..., "y":..., "label":...}, ...]
-- 柱状图: 加 "data_points": [{"x":..., "y":...}, ...] 和 "chart_type": "bar"
-- 散点/坐标: 加 "points": [{"lat":..., "lng":..., "label":...}, ...]
-- 区域/多边形: 加 "coordinates": [[[lng,lat],...]], "geometry_type": "Polygon"
-- 图片: 加 "image_base64": "base64编码字符串"
-- 表格: 加 "table": [{"col1": val, "col2": val}, ...]
+返回dict含计算结果，适合可视化时加对应字段：
+- GeoJSON: "geojson": {"type":"FeatureCollection","features":[...]}
+- 曲线: "data_points": [{"x":..., "y":..., "label":...}]
+- 柱状图: "data_points" + "chart_type":"bar"
+- 坐标: "points": [{"lat":..., "lng":..., "label":...}]
+- 表格: "table": [{"col1": val, ...}]
 
-可用: math, json, numpy(np)。"""},
-        {"role": "user", "content": f"需求: {query}\n\n生成一个compute_开头的函数。注意: 返回的dict里除了计算结果字段，如果数据适合画图或展示在地图上，务必加上 data_points / points / coordinates / table 等可视化字段。"}
+可用: math, json, numpy(np), scipy.spatial.Voronoi。"""},
+        {"role": "user", "content": f"需求: {query}\n\n生成compute_开头的函数，签名用**kwargs，参数用kwargs.get读取加默认值。完整实现算法，加上可视化字段。禁止简化！"}
     ]
     try:
         code, _, _ = await asyncio.wait_for(_call_llm(messages, model=MODEL_AIR, use_tools=False), timeout=25.0)
@@ -698,11 +742,122 @@ async def _generate_tool(query: str) -> dict | None:
         return None
 
 
+# ── auto_tool 自修复机制 ──
+
+_LAZY_PATTERNS = re.compile(
+    r'简化[版]?'            # "简化版"
+    r'|仅返回'              # "仅返回"
+    r'|TODO|FIXME'          # 占位标记
+    r'|实际需要.*更复杂'     # "实际需要更复杂的算法"
+    r'|这里仅'              # "这里仅..."
+    r'|简化处理'            # "简化处理"
+    r'|省略了|略去'         # "省略了"
+    , re.IGNORECASE
+)
+
+_GEOJSON_GEOM_TYPES = {"Polygon", "MultiPolygon", "LineString", "MultiLineString"}
+
+
+def _check_code_quality(code: str, query: str) -> list[str]:
+    issues = []
+    if _LAZY_PATTERNS.search(code):
+        issues.append("代码包含简化/偷懒标记")
+    fn_sig = re.search(r'def\s+\w+\s*\(([^)]*)\)', code)
+    if fn_sig:
+        params = fn_sig.group(1).strip()
+        if params and not params.startswith('**'):
+            issues.append(f"函数签名错误: 参数'{params}'应为**kwargs")
+    has_return_geojson = '"geojson"' in code or "'geojson'" in code
+    has_polygon_in_return = '"Polygon"' in code or "'Polygon'" in code
+    wants_polygon = any(kw in query for kw in ["多边形", "polygon", "多边", "区域", "凸包", "voronoi", "泰森", "网格"])
+    if wants_polygon and has_return_geojson and not has_polygon_in_return:
+        issues.append("需求要求多边形但代码未生成Polygon几何体")
+    wants_line = any(kw in query for kw in ["曲线", "线", "line", "路径", "流线", "螺旋"])
+    has_linestring = '"LineString"' in code or "'LineString'" in code
+    if wants_line and has_return_geojson and not has_linestring and not has_polygon_in_return:
+        issues.append("需求要求线几何但代码未生成LineString")
+    return issues
+
+
+def _check_result_quality(result: dict, query: str) -> list[str]:
+    """检查执行结果质量，返回问题列表"""
+    issues = []
+    if not isinstance(result, dict):
+        return ["结果不是dict类型"]
+    if "error" in result:
+        issues.append(f"执行报错: {result['error'][:100]}")
+    wants_polygon = any(kw in query for kw in ["多边形", "polygon", "多边", "凸包", "voronoi", "泰森", "网格"])
+    if wants_polygon:
+        gj = result.get("geojson")
+        if gj and isinstance(gj, dict):
+            features = gj.get("features", [])
+            has_real_geom = any(
+                f.get("geometry", {}).get("type") in _GEOJSON_GEOM_TYPES
+                for f in features if isinstance(f, dict)
+            )
+            if not has_real_geom and len(features) > 0:
+                issues.append("geojson中只有Point没有Polygon/LineString，未真正生成几何体")
+    return issues
+
+
+async def _generate_tool_with_retry(query: str, max_attempts: int = 3) -> tuple[dict | None, dict | None, list[str]]:
+    """生成工具+执行+质检+自修复循环。返回 (gen_info, result, all_logs)"""
+    logs = []
+    last_error = ""
+    for attempt in range(1, max_attempts + 1):
+        logs.append(f"[尝试 {attempt}/{max_attempts}]")
+        aug_query = query
+        if attempt > 1 and last_error:
+            aug_query = (
+                f"{query}\n\n"
+                f"【上次失败原因: {last_error}】\n"
+                f"你必须修复以上问题，完整实现算法，不要简化！"
+            )
+        gen = await _generate_tool(aug_query)
+        if not gen:
+            logs.append("代码生成失败")
+            last_error = "LLM未返回有效代码"
+            continue
+
+        code = gen.get("code", "")
+        code_issues = _check_code_quality(code, query)
+        if code_issues:
+            logs.append(f"代码质检不通过: {'; '.join(code_issues)}")
+            last_error = "; ".join(code_issues)
+            _delete_generated(gen["tool_name"])
+            continue
+
+        result = _exec_generated(gen["tool_name"], {})
+        result_issues = _check_result_quality(result, query)
+        if result_issues:
+            logs.append(f"结果质检不通过: {'; '.join(result_issues)}")
+            last_error = "; ".join(result_issues)
+            _delete_generated(gen["tool_name"])
+            continue
+
+        logs.append(f"✅ 第{attempt}次尝试成功")
+        return gen, result, logs
+
+    logs.append(f"❌ {max_attempts}次尝试均失败")
+    return None, None, logs
+
+
+def _delete_generated(tool_name: str):
+    f = GEN_TOOL_DIR / f"{tool_name}.py"
+    if f.exists():
+        f.unlink()
+    TOOL_TO_SERVER.pop(tool_name, None)
+
+
 def _exec_generated(tool_name: str, args: dict) -> dict:
     tool_file = GEN_TOOL_DIR / f"{tool_name}.py"
     if not tool_file.exists():
         return {"error": f"Generated tool {tool_name} not found"}
     code = tool_file.read_text(encoding="utf-8")
+    code = re.sub(r'def\s+(\w+)\s*\(\s*kwargs\s*\)', r'def \1(**kwargs)', code)
+    code = re.sub(r'def\s+(\w+)\s*\(\s*\)', r'def \1(**kwargs)', code)
+    if code != tool_file.read_text(encoding="utf-8"):
+        tool_file.write_text(code, encoding="utf-8")
     _safe_builtins = {
         "range": range, "len": len, "int": int, "float": float, "str": str,
         "list": list, "dict": dict, "tuple": tuple, "set": set, "bool": bool,
@@ -712,14 +867,20 @@ def _exec_generated(tool_name: str, args: dict) -> dict:
         "print": print, "True": True, "False": False, "None": None,
         "__import__": __import__,
     }
-    safe_globals = {"__builtins__": _safe_builtins, "math": math, "json": json, "np": np, "numpy": np}
+    safe_globals = {"__builtins__": _safe_builtins, "math": math, "json": json, "np": np, "numpy": np, "scipy": __import__('scipy'), "Voronoi": _ScipyVoronoi}
     safe_locals: dict = {}
     try:
         exec(code, safe_globals, safe_locals)
         fn = safe_locals.get(tool_name)
         if not fn:
             return {"error": f"Function {tool_name} not found in generated code"}
-        result = fn(**args)
+        try:
+            result = fn(**args)
+        except TypeError:
+            try:
+                result = fn(args)
+            except TypeError:
+                result = fn()
         return result if isinstance(result, dict) else {"result": str(result)}
     except Exception as e:
         return {"error": f"Execution error: {str(e)[:200]}"}
@@ -884,7 +1045,7 @@ GLM_TOOLS.extend([
     {"type": "function", "function": {"name": "satellite_search", "description": "搜索卫星遥感影像(Sentinel-2)", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]", "items": {"type": "number"}}, "date_start": {"type": "string", "description": "开始日期 YYYY-MM-DD"}, "date_end": {"type": "string", "description": "结束日期 YYYY-MM-DD"}}, "required": []}}},
     {"type": "function", "function": {"name": "spatial_knowledge_query", "description": "查询空间知识图谱(实体和关系)", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "查询关键词"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "scatter_interpolate", "description": "散点插值/克里金插值：将离散数据点插值为连续网格表面。支持克里金(Kriging)、IDW反距离加权、RBF径向基函数、linear/nearest/cubic方法。输入散点坐标和值，输出插值网格统计数据。", "parameters": {"type": "object", "properties": {"points_json": {"type": "string", "description": "散点JSON数组: [{\"x\":104.9,\"y\":33.15,\"z\":1200}, ...]"}, "method": {"type": "string", "description": "插值方法: kriging(克里金), idw(反距离), rbf(径向基), linear, nearest, cubic", "default": "linear"}, "grid_resolution": {"type": "integer", "description": "网格分辨率(NxN)", "default": 100}}, "required": []}}},
-    {"type": "function", "function": {"name": "auto_tool", "description": "当现有工具无法满足用户需求时，自动生成并执行新工具。用于：计算类任务(插值/拟合/统计)、数据转换、数学公式计算等。调用时描述用户完整需求。", "parameters": {"type": "object", "properties": {"requirement": {"type": "string", "description": "用户的完整需求描述，包含输入参数和期望输出"}, "params_json": {"type": "string", "description": "输入参数JSON，如{\"b\":2,\"h\":1.5,\"n\":0.015}"}}, "required": ["requirement"]}}},
+    {"type": "function", "function": {"name": "auto_tool", "description": "【最终兜底工具】自动生成并执行Python代码完成计算任务。当你发现现有工具无法满足用户需求时，必须调用此工具。适用场景：数学计算、公式推导、水力计算、水文分析、拟合统计、生成GeoJSON、绘制图表、表格计算、矩阵运算。不要输出代码文本，调用此工具即可自动执行。", "parameters": {"type": "object", "properties": {"requirement": {"type": "string", "description": "用户的完整需求描述，包含所有输入参数和期望输出格式"}, "params_json": {"type": "string", "description": "输入参数JSON，如{\"b\":2,\"h\":1.5,\"n\":0.015}"}}, "required": ["requirement"]}}},
 ])
 
 TOOL_TO_SERVER["weather_forecast"] = "internal"
@@ -902,7 +1063,7 @@ ROUTING_RULES.extend([
 
 # ── Internal tool handler ─────────────────────────────────────────────
 
-async def _handle_internal_tool(tool_name: str, args: dict) -> dict:
+async def _handle_internal_tool(tool_name: str, args: dict, user_msg: str = "") -> dict:
     if tool_name == "weather_forecast":
         return await _get_weather(args.get("latitude", 33.19), args.get("longitude", 104.89), args.get("forecast_days", 3))
     if tool_name == "satellite_search":
@@ -919,16 +1080,13 @@ async def _handle_internal_tool(tool_name: str, args: dict) -> dict:
     if tool_name == "auto_tool":
         requirement = args.get("requirement", "")
         params_json = args.get("params_json", "")
-        gen = await _generate_tool(requirement)
-        if not gen:
-            return {"error": f"无法为需求生成工具: {requirement[:100]}"}
-        params = {}
-        if params_json:
-            try:
-                params = json.loads(params_json)
-            except json.JSONDecodeError:
-                params = {}
-        result = _exec_generated(gen["tool_name"], params)
+        if user_msg and len(user_msg) > len(requirement):
+            requirement = f"{requirement}。用户原始请求: {user_msg}"
+        gen, result, logs = await _generate_tool_with_retry(requirement, max_attempts=3)
+        for log in logs:
+            logger.info(f"[auto_tool] {log}")
+        if not gen or not result:
+            return {"error": f"工具生成失败(3次重试): {requirement[:80]}", "logs": logs}
         result["_generated_tool"] = gen["tool_name"]
         result["_generated_file"] = gen["file"]
         return result
@@ -1192,7 +1350,7 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
         if is_simple:
             yield _sse({"type": "thinking", "agent": "planner", "content": "简单查询，直接执行"})
         elif is_direct:
-            yield _sse({"type": "thinking", "agent": "planner", "content": f"直接调用: {direct_tool}"})
+            yield _sse({"type": "thinking", "agent": "planner", "content": f"建议工具: {direct_tool}"})
         else:
             yield _sse({"type": "thinking", "agent": "planner", "content": f"📋 执行计划:\n{plan[:300]}"})
         yield _sse({"type": "thinking_end", "agent": "planner"})
@@ -1203,7 +1361,7 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
             {"role": "user", "content": message},
         ]
         if is_direct:
-            react_messages.append({"role": "assistant", "content": f"好的，直接调用 {direct_tool} 工具。"})
+            react_messages.append({"role": "assistant", "content": f"建议使用 {direct_tool} 工具。如果该工具不适合当前任务，请改用 auto_tool。"})
         elif not is_simple:
             plan_header = f"""已制定执行计划，你必须严格按顺序逐步执行全部步骤。不要跳过任何步骤，不要提前结束。
 
@@ -1219,7 +1377,7 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
             react_messages.append({"role": "assistant", "content": plan_header})
             react_messages.append({"role": "user", "content": "现在开始执行第1步。"})
 
-        react_max = 3 if is_direct else MAX_REACT_STEPS
+        react_max = 3 if is_simple else MAX_REACT_STEPS
         executed: set[str] = set()
         total_tools = 0
 
@@ -1235,7 +1393,12 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
                 break
 
             if reasoning:
-                yield _sse({"type": "thinking", "agent": "react", "content": f"💭 {reasoning.replace(chr(10), ' ').strip()[:120]}..."})
+                for line in reasoning.replace(chr(10), '\n').split('\n'):
+                    line = line.strip()
+                    if line:
+                        yield _sse({"type": "thinking", "agent": "react", "content": f"💭 {line[:300]}"})
+            else:
+                yield _sse({"type": "thinking", "agent": "react", "content": "💭 分析用户请求..."})
 
             if content and not tool_calls:
                 is_multi_step = not is_simple and not is_direct
@@ -1288,6 +1451,8 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
                     args = {}
                 if not isinstance(args, dict):
                     args = {}
+                args_summary = json.dumps(args, ensure_ascii=False)[:100]
+                yield _sse({"type": "thinking", "agent": "react", "content": f"🎯 决定调用: {tool_name}({args_summary})"})
                 args_key = hashlib.md5(json.dumps(args, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
                 dedup = f"{tool_name}:{args_key}"
                 if dedup in executed:
@@ -1311,12 +1476,24 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
                 logger.debug(f"_exec_task: tool={tool_name}, server={server}, args_keys={list(args.keys())}")
                 if server == "generated":
                     r = _exec_generated(tool_name, args)
+                    if isinstance(r, dict) and "error" not in r:
+                        quality_issues = _check_result_quality(r, user_msg)
+                        if quality_issues:
+                            logger.info(f"[generated] 质检不通过({'; '.join(quality_issues)})，删除旧文件重新生成")
+                            _delete_generated(tool_name)
+                            gen, r_new, _ = await _generate_tool_with_retry(f"用户需要: {user_msg} -> {tool_name}", max_attempts=2)
+                            if gen and r_new:
+                                r = r_new
+                                r["_generated_tool"] = gen["tool_name"]
+                            else:
+                                r = {"error": f"重新生成失败: {quality_issues[0]}"}
                 elif server == "internal":
-                    r = await _handle_internal_tool(tool_name, args)
+                    r = await _handle_internal_tool(tool_name, args, user_msg)
                 elif not server:
-                    gen = await _generate_tool(f"用户需要: {user_msg} -> {tool_name}")
-                    if gen:
-                        r = _exec_generated(gen["tool_name"], args)
+                    gen, r_try, _ = await _generate_tool_with_retry(f"用户需要: {user_msg} -> {tool_name}", max_attempts=2)
+                    if gen and r_try:
+                        r = r_try
+                        r["_generated_tool"] = gen["tool_name"]
                     else:
                         r = {"error": f"Unknown tool: {tool_name}"}
                 else:
@@ -1332,6 +1509,21 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
 
                 total_tools += 1
                 label = AGENT_LABELS.get(server, server)
+
+                result_keys = list(result.keys()) if isinstance(result, dict) else []
+                has_geojson = "geojson" in result_keys
+                has_data = "data_points" in result_keys
+                has_table = "table" in result_keys
+                has_img = "image_base64" in result_keys
+                viz_parts = []
+                if has_geojson: viz_parts.append("GeoJSON")
+                if has_data: viz_parts.append("曲线图")
+                if has_table: viz_parts.append("表格")
+                if has_img: viz_parts.append("图片")
+                if viz_parts:
+                    yield _sse({"type": "thinking", "agent": "react", "content": f"📊 {tool_name} 返回结果包含: {' + '.join(viz_parts)}"})
+                elif isinstance(result, dict) and "error" not in result:
+                    yield _sse({"type": "thinking", "agent": "react", "content": f"✅ {tool_name} 执行成功，返回{len(result_keys)}个字段"})
 
                 valid, validation_msg = _validate_result(tool_name, args, result if isinstance(result, dict) else {})
                 if not valid:
