@@ -74,7 +74,7 @@ html,body{height:100%;font-family:'Noto Sans SC',sans-serif;background:var(--bg-
 @keyframes fadeInOut{0%{opacity:0;transform:translate(-50%,-50%) scale(.95)}10%{opacity:1;transform:translate(-50%,-50%) scale(1)}80%{opacity:1}100%{opacity:0;transform:translate(-50%,-50%) scale(.98)}}
 
 /* === Chat Panel === */
-.chat-panel{background:var(--bg-panel);backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);display:flex;flex-direction:column;border-left:var(--glass-border);overflow:hidden;min-height:0}
+.chat-panel{background:var(--bg-panel);backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);display:flex;flex-direction:column;border-left:var(--glass-border);overflow:hidden;min-height:0;position:relative}
 .chat-header{padding:14px 20px;border-bottom:var(--glass-border);display:flex;align-items:center;gap:10px;font-weight:600;font-size:14px;flex-shrink:0;background:rgba(13,19,33,.5)}
 .chat-header .online{width:8px;height:8px;border-radius:50%;background:var(--accent3);box-shadow:0 0 8px var(--accent3);animation:pulse 2s infinite}
 .chat-messages{flex:1;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;scroll-behavior:smooth}
@@ -83,32 +83,125 @@ html,body{height:100%;font-family:'Noto Sans SC',sans-serif;background:var(--bg-
 .chat-messages::-webkit-scrollbar-thumb{background:rgba(0,212,255,.2);border-radius:3px}
 .chat-messages::-webkit-scrollbar-thumb:hover{background:rgba(0,212,255,.35)}
 
-.msg{max-width:92%;animation:slideUp .35s cubic-bezier(.4,0,.2,1)}
+.msg{max-width:88%;animation:slideUp .35s cubic-bezier(.4,0,.2,1);display:flex;gap:10px;align-items:flex-start}
 @keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
-.msg.user{align-self:flex-end;background:linear-gradient(135deg,rgba(0,212,255,.1),rgba(124,58,237,.1));border:1px solid rgba(0,212,255,.18);border-radius:var(--radius) var(--radius) 4px var(--radius);padding:10px 16px;font-size:13px;line-height:1.6;backdrop-filter:blur(4px)}
-.msg.bot{align-self:flex-start;background:var(--bg-card);backdrop-filter:blur(4px);border:1px solid var(--border);border-radius:var(--radius) var(--radius) var(--radius) 4px;padding:12px 16px;font-size:13px;line-height:1.7;max-width:92%;min-width:200px;word-break:break-word}
+.msg .avatar{width:36px;height:36px;min-width:36px;border-radius:10px;display:grid;place-items:center;font-size:16px;font-weight:700;flex-shrink:0;position:relative;overflow:hidden}
+.msg .avatar::after{content:'';position:absolute;inset:0;border-radius:inherit;border:1px solid rgba(255,255,255,.1)}
+.msg .avatar.bot-av{background:linear-gradient(135deg,#0d1a2d,#0a1628);box-shadow:0 0 16px rgba(0,212,255,.2)}
+.msg .avatar.bot-av svg{width:22px;height:22px}
+.msg .avatar.user-av{background:linear-gradient(135deg,rgba(0,212,255,.15),rgba(124,58,237,.15));box-shadow:0 0 16px rgba(124,58,237,.2);font-size:14px;color:var(--text)}
+.msg .msg-content{flex:1;min-width:0}
+.msg.user{align-self:flex-end;flex-direction:row-reverse}
+.msg.user .msg-content{background:linear-gradient(135deg,rgba(0,212,255,.1),rgba(124,58,237,.1));border:1px solid rgba(0,212,255,.18);border-radius:var(--radius) var(--radius) 4px var(--radius);padding:10px 16px;font-size:13px;line-height:1.6;backdrop-filter:blur(4px);animation:msgUserIn .4s cubic-bezier(.4,0,.2,1);position:relative;overflow:hidden}
+.msg.user .msg-content::after{content:'';position:absolute;inset:0;border-radius:inherit;background:linear-gradient(135deg,rgba(0,212,255,.08),transparent,rgba(124,58,237,.08));opacity:0;transition:opacity .3s}
+.msg.user:hover .msg-content::after{opacity:1}
+@keyframes msgUserIn{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+.msg.bot .msg-content{background:var(--bg-card);backdrop-filter:blur(4px);border:1px solid var(--border);border-radius:var(--radius) var(--radius) var(--radius) 4px;padding:12px 16px;font-size:13px;line-height:1.7;min-width:200px;word-break:break-word;animation:msgBotIn .4s cubic-bezier(.4,0,.2,1);position:relative}
+@keyframes msgBotIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .msg.bot>div{display:block;margin:4px 0}
 .msg.bot .tool-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.12);color:var(--accent);font-size:10px;padding:2px 10px;border-radius:10px;font-family:'JetBrains Mono',monospace;margin:4px 2px}
-.msg.bot pre{background:rgba(6,10,19,.8);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin:8px 0;font-size:11px;font-family:'JetBrains Mono',monospace;overflow-x:auto;color:var(--accent);white-space:pre-wrap;box-shadow:inset 0 1px 3px rgba(0,0,0,.3)}
-.msg.bot img{max-width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);margin:8px 0;box-shadow:var(--shadow-sm)}
+.msg.bot pre,.msg .msg-content pre{background:rgba(6,10,19,.8);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin:8px 0;font-size:11px;font-family:'JetBrains Mono',monospace;overflow-x:auto;color:var(--accent);white-space:pre-wrap;box-shadow:inset 0 1px 3px rgba(0,0,0,.3)}
+.msg.bot img,.msg .msg-content img{max-width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);margin:8px 0;box-shadow:var(--shadow-sm)}
+.msg .msg-content .tool-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.12);color:var(--accent);font-size:10px;padding:2px 10px;border-radius:10px;font-family:'JetBrains Mono',monospace;margin:4px 2px}
+
+/* === Enhanced Tool Status === */
+.tool-status{display:flex;align-items:center;gap:8px;font-size:11px;font-family:'JetBrains Mono',monospace;padding:6px 12px;margin:2px 0;border-radius:6px;background:rgba(0,212,255,.03);border:1px solid rgba(0,212,255,.08);transition:all .3s}
+.tool-status .ts-icon{font-size:12px}
+.tool-status .ts-name{color:var(--text-dim);flex:1}
+.tool-status .ts-time{color:var(--accent3);font-size:10px}
+.tool-status.ts-running{border-color:rgba(0,212,255,.2);background:rgba(0,212,255,.06)}
+.tool-status.ts-running .ts-icon{animation:pulse 1s ease infinite;color:var(--accent)}
+.tool-status.ts-ok{border-color:rgba(16,185,129,.2);background:rgba(16,185,129,.04)}
+.tool-status.ts-ok .ts-icon{color:var(--accent3)}
+@keyframes tsFlashGreen{0%{box-shadow:0 0 16px rgba(16,185,129,.5)}100%{box-shadow:none}}
+.tool-status.ts-flash{animation:tsFlashGreen .6s ease}
+.tool-status.ts-error{border-color:rgba(239,68,68,.25);background:rgba(239,68,68,.06)}
+.tool-status.ts-error .ts-icon{color:var(--danger)}
+
+/* === Error Card === */
+.error-card{border:1px solid rgba(239,68,68,.3);border-radius:var(--radius-sm);background:rgba(239,68,68,.06);padding:10px 14px;margin:6px 0;font-size:12px;color:#fca5a5;backdrop-filter:blur(4px)}
+.error-card .ec-header{display:flex;align-items:center;gap:6px;font-weight:700;color:var(--danger);cursor:pointer;user-select:none}
+.error-card .ec-header::before{content:'⚠️';font-size:13px}
+.error-card .ec-header::after{content:'▸';font-size:10px;margin-left:auto;transition:transform .2s}
+.error-card.ec-open .ec-header::after{transform:rotate(90deg)}
+.error-card .ec-body{display:none;margin-top:8px;padding:8px;background:rgba(0,0,0,.3);border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);white-space:pre-wrap;max-height:200px;overflow-y:auto}
+.error-card.ec-open .ec-body{display:block}
+
+/* === Debate Card === */
+.debate-card{border:1px solid rgba(124,58,237,.25);border-radius:var(--radius-sm);background:rgba(124,58,237,.06);padding:10px 14px;margin:6px 0;font-size:12px;backdrop-filter:blur(4px);animation:slideUp .35s ease}
+.debate-card .dc-title{display:flex;align-items:center;gap:6px;font-weight:700;font-size:11px;letter-spacing:.5px;font-family:'JetBrains Mono',monospace}
+.debate-card .dc-title.pass{color:var(--accent3)}
+.debate-card .dc-title.fail{color:var(--danger)}
+.debate-card .dc-title::before{content:'⚖️';font-size:13px}
+.debate-card .dc-radar{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.debate-card .dc-critic{flex:1;min-width:120px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:rgba(6,10,19,.5);font-size:10px;font-family:'JetBrains Mono',monospace}
+.debate-card .dc-critic .cr-role{font-weight:700;margin-bottom:3px}
+.debate-card .dc-critic .cr-score{display:flex;align-items:center;gap:4px;margin:3px 0}
+.debate-card .dc-critic .cr-bar{height:4px;border-radius:2px;background:rgba(255,255,255,.06);overflow:hidden;flex:1;max-width:60px}
+.debate-card .dc-critic .cr-bar-fill{height:100%;border-radius:2px;transition:width .5s ease}
+.debate-card .dc-critic .cr-issue{color:var(--warn);margin-top:2px}
+.debate-card.dc-pass{border-color:rgba(16,185,129,.2);background:rgba(16,185,129,.04)}
+
+/* === Physics Warning === */
+.physics-card{border:1px solid rgba(245,158,11,.25);border-radius:var(--radius-sm);background:rgba(245,158,11,.06);padding:8px 14px;margin:6px 0;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--warn);animation:slideUp .35s ease;display:flex;align-items:center;gap:8px}
+.physics-card::before{content:'⚡';font-size:14px}
+.physics-card .pw-items{display:flex;flex-direction:column;gap:2px}
+.physics-card .pw-item{color:var(--text-dim);font-size:10px}
+.physics-card .pw-item b{color:var(--warn)}
+
+/* === Code Collapse === */
+.code-collapse{border:1px solid var(--border);border-radius:var(--radius-sm);margin:6px 0;overflow:hidden;background:rgba(6,10,19,.6)}
+.code-collapse .cc-header{display:flex;align-items:center;gap:6px;padding:6px 12px;background:rgba(0,212,255,.04);font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--accent);cursor:pointer;user-select:none;border-bottom:1px solid var(--border)}
+.code-collapse .cc-header::before{content:'⟨⟩';font-size:11px}
+.code-collapse .cc-header::after{content:'展开';margin-left:auto;color:var(--text-dim);font-size:9px}
+.code-collapse.cc-open .cc-header::after{content:'收起'}
+.code-collapse .cc-body{display:none;padding:10px 12px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--accent);white-space:pre-wrap;max-height:300px;overflow-y:auto;line-height:1.6;background:rgba(6,10,19,.8)}
+.code-collapse.cc-open .cc-body{display:block}
+
+/* === Map Layer Panel === */
+.layer-panel{position:absolute;top:50px;right:10px;z-index:1000;width:200px;max-height:320px;background:rgba(6,10,19,.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(0,212,255,.12);border-radius:10px;overflow:hidden;display:none;box-shadow:0 4px 24px rgba(0,0,0,.5)}
+.layer-panel.lp-open{display:block;animation:layerSlideIn .25s ease}
+@keyframes layerSlideIn{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}
+.layer-panel .lp-title{padding:8px 12px;font-size:10px;font-weight:700;color:var(--accent);letter-spacing:1px;font-family:'JetBrains Mono',monospace;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px}
+.layer-panel .lp-title::before{content:'☰'}
+.layer-panel .lp-list{overflow-y:auto;max-height:270px;padding:4px}
+.layer-panel .lp-list::-webkit-scrollbar{width:3px}
+.layer-panel .lp-list::-webkit-scrollbar-thumb{background:rgba(0,212,255,.2);border-radius:2px}
+.lp-item{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;font-size:11px;color:var(--text-dim);transition:all .2s;cursor:default}
+.lp-item:hover{background:rgba(0,212,255,.06);color:var(--text)}
+.lp-item .lp-toggle{width:14px;height:14px;border-radius:4px;border:1.5px solid rgba(0,212,255,.3);cursor:pointer;display:grid;place-items:center;font-size:9px;transition:all .2s;flex-shrink:0}
+.lp-item .lp-toggle.on{background:var(--accent);border-color:var(--accent);color:#000;box-shadow:0 0 6px rgba(0,212,255,.4)}
+.lp-item .lp-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lp-item .lp-del{font-size:10px;color:var(--danger);cursor:pointer;opacity:0;transition:opacity .2s}
+.lp-item:hover .lp-del{opacity:1}
+
+/* === Typing Cursor === */
+.typing-cursor::after{content:'▍';color:var(--accent);animation:blink 1s step-end infinite;font-weight:300}
+@keyframes blink{50%{opacity:0}}
 
 /* === Thinking Chain === */
-.thinking-box{width:100%;background:rgba(124,58,237,.05);border:1px solid rgba(124,58,237,.15);border-radius:var(--radius-sm);margin:0 0 8px 0;padding:10px 14px;font-size:12px;font-family:'JetBrains Mono',monospace;line-height:2;overflow-y:auto;max-height:180px;box-sizing:border-box;position:sticky;top:0;z-index:10;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
-.thinking-box::before{content:'';position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(135deg,rgba(124,58,237,.3),transparent,rgba(0,212,255,.3));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
-.thinking-box .th-header{color:var(--accent2);font-weight:600;font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px}
-.thinking-box .th-header .th-spinner{display:inline-block;width:10px;height:10px;border:2px solid rgba(124,58,237,.25);border-top-color:var(--accent2);border-radius:50%;animation:spin .7s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.thinking-box .th-line{color:var(--text-dim);padding-left:14px;position:relative;animation:fadeIn .3s ease}
-@keyframes fadeIn{from{opacity:0;transform:translateX(-4px)}to{opacity:1;transform:translateX(0)}}
-.thinking-box .th-line::before{content:'›';position:absolute;left:0;color:var(--accent2);opacity:.5}
-.thinking-box .th-line.active{color:var(--text)}
+.thinking-box{width:100%;background:rgba(124,58,237,.06);border:1px solid rgba(124,58,237,.18);border-radius:var(--radius-sm);margin:0 0 8px 0;padding:10px 14px;font-size:12px;font-family:'JetBrains Mono',monospace;line-height:1.9;max-height:260px;overflow-y:auto;box-sizing:border-box;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);animation:thinkReveal .35s cubic-bezier(.22,1,.36,1);position:relative}
+.thinking-box::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent 0%,#7c3aed 20%,#00d4ff 50%,#7c3aed 80%,transparent 100%);background-size:200% 100%;animation:borderSweep 2s linear infinite;border-radius:var(--radius-sm) var(--radius-sm) 0 0}
+@keyframes borderSweep{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes thinkReveal{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+.thinking-box .th-header{color:var(--accent2);font-weight:600;font-size:11px;margin-bottom:4px;display:flex;align-items:center;gap:8px;letter-spacing:.5px}
+.thinking-box .th-header .th-spinner{display:inline-block;width:10px;height:10px;border:2px solid rgba(124,58,237,.2);border-top-color:var(--accent2);border-radius:50%;animation:spin .6s linear infinite}
+.thinking-box .th-progress{height:2px;background:rgba(124,58,237,.1);border-radius:1px;margin-bottom:6px;overflow:hidden}
+.thinking-box .th-progress-bar{height:100%;background:linear-gradient(90deg,#7c3aed,#00d4ff);border-radius:1px;transition:width .3s ease;width:0}
+.thinking-box .th-line{color:var(--text-dim);padding-left:16px;position:relative;animation:thinkLineIn .3s ease;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@keyframes thinkLineIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
+.thinking-box .th-line::before{content:'>';position:absolute;left:0;color:var(--accent2);opacity:.4;font-weight:700}
+.thinking-box .th-line.active{color:var(--text);text-shadow:0 0 6px rgba(0,212,255,.12)}
 .thinking-box .th-line.done{color:var(--accent3)}
 
-.divider-line{display:flex;align-items:center;gap:12px;margin:12px 0;font-size:11px;color:var(--accent);font-family:'JetBrains Mono',monospace;letter-spacing:1.5px;text-shadow:0 0 8px rgba(0,212,255,.3)}
+.divider-line{display:flex;align-items:center;gap:12px;margin:12px 0;font-size:11px;color:var(--accent);font-family:'JetBrains Mono',monospace;letter-spacing:1.5px;text-shadow:0 0 8px rgba(0,212,255,.3);animation:dividerIn .4s ease}
+@keyframes dividerIn{from{opacity:0;transform:scaleX(.9)}to{opacity:1;transform:scaleX(1)}}
 .divider-line::before,.divider-line::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,transparent,rgba(0,212,255,.4),transparent)}
 
-.tool-status{display:flex;align-items:center;gap:8px;padding:8px 14px;margin:4px 0;background:var(--bg-card);backdrop-filter:blur(4px);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px;font-family:'JetBrains Mono',monospace;animation:slideUp .3s ease;position:relative;overflow:hidden}
-.tool-status.running::after{content:'';position:absolute;top:0;left:-100%;width:100%;height:100%;background:linear-gradient(90deg,transparent,rgba(0,212,255,.05),transparent);animation:shimmer 2s infinite}
+.tool-status{display:flex;align-items:center;gap:8px;padding:8px 14px;margin:4px 0;background:var(--bg-card);backdrop-filter:blur(4px);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px;font-family:'JetBrains Mono',monospace;animation:slideUp .3s ease;position:relative;overflow:hidden;transition:border-color .3s,box-shadow .3s}
+.tool-status:hover{border-color:rgba(0,212,255,.3);box-shadow:0 0 12px rgba(0,212,255,.08)}
+.tool-status.running{border-color:rgba(0,212,255,.25)}
+.tool-status.running::after{content:'';position:absolute;top:0;left:-100%;width:100%;height:100%;background:linear-gradient(90deg,transparent,rgba(0,212,255,.06),transparent);animation:shimmer 2s infinite}
 @keyframes shimmer{to{left:100%}}
 .tool-status .ts-icon{font-size:14px}
 .tool-status .ts-name{color:var(--accent)}
@@ -121,7 +214,9 @@ html,body{height:100%;font-family:'Noto Sans SC',sans-serif;background:var(--bg-
 @keyframes blink{0%,60%,100%{opacity:.3;transform:scale(.8)}30%{opacity:1;transform:scale(1)}}
 
 /* === Chat Input === */
-.chat-input{padding:12px 14px;border-top:var(--glass-border);display:flex;gap:10px;align-items:center;flex-shrink:0;background:rgba(13,19,33,.5)}
+.chat-input{padding:12px 14px;border-top:var(--glass-border);display:flex;gap:10px;align-items:center;flex-shrink:0;background:rgba(13,19,33,.5);position:relative;transition:all .4s ease}
+.chat-input.ai-thinking{border-top-color:rgba(124,58,237,.3)}
+.chat-input.ai-thinking::before{content:'';position:absolute;top:-1px;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,#7c3aed,#00d4ff,#7c3aed,transparent);background-size:200% 100%;animation:borderSweep 2s linear infinite}
 .chat-input input{flex:1;background:var(--bg-input);border:1.5px solid var(--border);border-radius:var(--radius);padding:12px 18px;color:var(--text-bright);font-size:13px;font-family:'Noto Sans SC',sans-serif;outline:none;transition:all .3s cubic-bezier(.4,0,.2,1)}
 .chat-input input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,212,255,.1),0 0 16px rgba(0,212,255,.1)}
 .chat-input input::placeholder{color:var(--text-dim)}
@@ -370,6 +465,11 @@ html,body{height:100%;font-family:'Noto Sans SC',sans-serif;background:var(--bg-
       <button class="map-btn" onclick="map.setView([22.5431,114.0579],10)">&#9679; 深圳</button>
       <button class="map-btn" onclick="addDemoLayer()">&#9654; 加载示例图层</button>
       <button class="map-btn" id="btn3d" onclick="toggle3D()">&#9651; 3D地形</button>
+      <button class="map-btn" onclick="toggleLayerPanel()" title="图层管理">&#9776; 图层</button>
+    </div>
+    <div class="layer-panel" id="layerPanel">
+      <div class="lp-title">图层管理</div>
+      <div class="lp-list" id="lp-list"></div>
     </div>
     <div class="map-info" id="map-coords">LatLng: --</div>
     <div id="water-control" style="display:none;position:absolute;bottom:50px;left:10px;z-index:1000;background:var(--bg-panel);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12px">
@@ -386,13 +486,16 @@ html,body{height:100%;font-family:'Noto Sans SC',sans-serif;background:var(--bg-
     </div>
     <div class="chat-messages" id="messages">
       <div class="msg bot">
-        &#127754; <b>水利空间智能体已就绪</b><br><br>
-        我可以帮你进行空间分析、查询水利参数、检索知识库。试试：<br><br>
-        &bull; 查询HDPE管的曼宁糙率<br>
-        &bull; 北京的暴雨强度公式<br>
-        &bull; 生成一个缓冲区分析<br>
-        &bull; 验证一份GeoJSON数据<br>
-        &bull; 渲染地图
+        <div class="avatar bot-av"><svg viewBox="0 0 24 24" fill="none" stroke="#00d4ff" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><circle cx="9" cy="10" r="1.5" fill="#00d4ff"/><circle cx="15" cy="10" r="1.5" fill="#00d4ff"/><path d="M8 15c1.5 1.5 5 1.5 8 0" stroke-linecap="round"/><path d="M3 6V3h3M18 3h3v3" stroke-linecap="round" stroke-width="1"/><circle cx="12" cy="3" r="1" fill="#7c3aed"/></svg></div>
+        <div class="msg-content">
+          &#127754; <b>水利空间智能体已就绪</b><br><br>
+          我可以帮你进行空间分析、查询水利参数、检索知识库。试试：<br><br>
+          &bull; 查询HDPE管的曼宁糙率<br>
+          &bull; 北京的暴雨强度公式<br>
+          &bull; 生成一个缓冲区分析<br>
+          &bull; 验证一份GeoJSON数据<br>
+          &bull; 渲染地图
+        </div>
       </div>
     </div>
     <div class="suggestions">
@@ -433,18 +536,61 @@ let mapLayers=[];
 let currentThinkingBox=null;
 let currentThinkingLines=[];
 let chatHistory=[];
+var _sessionStart=Date.now();
+setInterval(function(){_sessionMs=Date.now()-_sessionStart;if(typeof refreshDash==='function')refreshDash()},5000);
 
 const map=L.map('map',{zoomControl:true,attributionControl:false}).setView([39.9042,116.4074],11);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:19}).addTo(map);
 map.on('mousemove',e=>{document.getElementById('map-coords').textContent=`LatLng: ${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`});
 
+let _layerId=0;
+let _layerMeta=[];
+
 function clearMapLayers(){
   mapLayers.forEach(l=>map.removeLayer(l));
   mapLayers=[];
+  _layerMeta=[];
+  updateLayerPanel();
 }
-function addMapLayer(layer){
+function addMapLayer(layer, label){
   mapLayers.push(layer);
+  var id=++_layerId;
+  _layerMeta.push({id:id,layer:layer,label:label||('图层 #'+id),visible:true});
+  updateLayerPanel();
   return layer;
+}
+function updateLayerPanel(){
+  var list=document.getElementById('lp-list');
+  if(!list)return;
+  var html='';
+  for(var i=_layerMeta.length-1;i>=0;i--){
+    var m=_layerMeta[i];
+    html+='<div class="lp-item">';
+    html+='<span class="lp-toggle '+(m.visible?'on':'')+'" onclick="toggleMapLayer('+m.id+',this)">'+(m.visible?'✓':'')+'</span>';
+    html+='<span class="lp-label">'+m.label+'</span>';
+    html+='<span class="lp-del" onclick="removeMapLayerById('+m.id+')">✕</span>';
+    html+='</div>';
+  }
+  list.innerHTML=html;
+}
+function toggleMapLayer(id,el){
+  var m=_layerMeta.find(function(x){return x.id===id});
+  if(!m)return;
+  m.visible=!m.visible;
+  if(m.visible){map.addLayer(m.layer)}else{map.removeLayer(m.layer)}
+  if(el){el.classList.toggle('on',m.visible);el.textContent=m.visible?'✓':''}
+}
+function removeMapLayerById(id){
+  var idx=_layerMeta.findIndex(function(x){return x.id===id});
+  if(idx<0)return;
+  map.removeLayer(_layerMeta[idx].layer);
+  mapLayers.splice(mapLayers.indexOf(_layerMeta[idx].layer),1);
+  _layerMeta.splice(idx,1);
+  updateLayerPanel();
+}
+function toggleLayerPanel(){
+  var lp=document.getElementById('layerPanel');
+  lp.classList.toggle('lp-open');
 }
 
 function addDemoLayer(){
@@ -462,7 +608,7 @@ function addDemoLayer(){
     pointToLayer:(f,ll)=>L.circleMarker(ll,{radius:6,fillColor:'#00d4ff',fillOpacity:.8,color:'#fff',weight:1}),
     onEachFeature:(f,layer)=>layer.bindPopup(`<b>${f.properties.name}</b><br>${JSON.stringify(f.properties)}`)
   }).addTo(map);
-  addMapLayer(l);
+  addMapLayer(l,'示例图层');
   map.fitBounds(l.getBounds().pad(.1));
   addEvent('system','map','load_demo_layer');
 }
@@ -480,20 +626,31 @@ function addEvent(agent,action,detail){
 
 function ask(el){document.getElementById('input').value=el.textContent;send()}
 
+const BOT_AVATAR_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="#00d4ff" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><circle cx="9" cy="10" r="1.5" fill="#00d4ff"/><circle cx="15" cy="10" r="1.5" fill="#00d4ff"/><path d="M8 15c1.5 1.5 5 1.5 8 0" stroke-linecap="round"/><path d="M3 6V3h3M18 3h3v3" stroke-linecap="round" stroke-width="1"/><circle cx="12" cy="3" r="1" fill="#7c3aed"/></svg>';
+
 function addMsg(type,html){
   const d=document.createElement('div');
   d.className=`msg ${type}`;
-  d.innerHTML=html;
+  const av=document.createElement('div');
+  av.className='avatar '+(type==='user'?'user-av':'bot-av');
+  if(type==='user'){av.textContent='U'}
+  else{av.innerHTML=BOT_AVATAR_SVG}
+  const mc=document.createElement('div');
+  mc.className='msg-content';
+  mc.innerHTML=html;
+  d.appendChild(av);
+  d.appendChild(mc);
   const box=document.getElementById('messages');
   box.appendChild(d);
   box.scrollTop=box.scrollHeight;
-  return d;
+  return mc;
 }
 
 function createThinkingBox(agent, label){
+  if(currentThinkingBox){currentThinkingBox=null;currentThinkingLines=[]}
   const box=document.createElement('div');
   box.className='thinking-box';
-  box.innerHTML=`<div class="th-header"><span class="th-spinner"></span> ${label} &mdash; ${agent}</div>`;
+  box.innerHTML=`<div class="th-header"><span class="th-spinner"></span> ${label} &mdash; ${agent}</div><div class="th-progress"><div class="th-progress-bar"></div></div>`;
   currentThinkingBox=box;
   currentThinkingLines=[];
   const msgBox=document.getElementById('messages');
@@ -509,8 +666,11 @@ function addThinkingLine(content, state='active'){
   line.textContent=content;
   currentThinkingBox.appendChild(line);
   currentThinkingLines.push(line);
+  currentThinkingBox.scrollTop=currentThinkingBox.scrollHeight;
   const msgBox=document.getElementById('messages');
   msgBox.scrollTop=msgBox.scrollHeight;
+  var pb=currentThinkingBox.querySelector('.th-progress-bar');
+  if(pb){var pct=Math.min(100,currentThinkingLines.length*15);pb.style.width=pct+'%'}
 }
 
 function markLastThinkingDone(){
@@ -521,10 +681,19 @@ function markLastThinkingDone(){
 
 function closeThinkingBox(){
   if(!currentThinkingBox) return;
-  const spinner=currentThinkingBox.querySelector('.th-spinner');
+  const box=currentThinkingBox;
+  var pb=box.querySelector('.th-progress-bar');
+  if(pb) pb.style.width='100%';
+  const spinner=box.querySelector('.th-spinner');
   if(spinner) spinner.style.display='none';
-  const header=currentThinkingBox.querySelector('.th-header');
-  if(header) header.innerHTML='✓ '+header.textContent.split('—')[0]+' — complete';
+  const header=box.querySelector('.th-header');
+  if(header){
+    var txt=header.textContent;
+    var parts=txt.split('\u2014');
+    if(parts.length>=1){
+      header.innerHTML='<span style="color:var(--accent3);font-size:13px">&#10003;</span> '+parts[0].trim()+' <span style="color:var(--text-dim)">\u2014 complete</span>';
+    }
+  }
   currentThinkingBox=null;
   currentThinkingLines=[];
 }
@@ -537,13 +706,48 @@ function addDivider(text){
   document.getElementById('messages').scrollTop=99999;
 }
 
+var _toolTimers={};
 function addToolStatus(server,tool,status,ms){
-  const d=document.createElement('div');
-  d.className='tool-status';
-  const icon=status==='ok'?'✅':status==='running'?'⏳':'❌';
-  d.innerHTML=`<span class="ts-icon">${icon}</span> <span class="ts-name">${server}.${tool}</span> ${ms?`<span class="ts-time">${ms}ms</span>`:''}`;
-  document.getElementById('messages').appendChild(d);
-  document.getElementById('messages').scrollTop=99999;
+  if(status==='running'){
+    var key=server+'.'+tool;
+    var d=document.createElement('div');
+    d.className='tool-status ts-running';
+    d.id='ts_'+key.replace(/[^a-z0-9]/gi,'_');
+    var t0=Date.now();
+    d.innerHTML=`<span class="ts-icon">⏳</span> <span class="ts-name">${server}.${tool}</span> <span class="ts-time" id="timer_${key.replace(/[^a-z0-9]/gi,'_')}">0ms</span>`;
+    document.getElementById('messages').appendChild(d);
+    document.getElementById('messages').scrollTop=99999;
+    _toolTimers[key]=setInterval(function(){
+      var el=document.getElementById('timer_'+key.replace(/[^a-z0-9]/gi,'_'));
+      if(el)el.textContent=(Date.now()-t0)+'ms';
+    },100);
+  }else if(status==='ok'){
+    var key=server+'.'+tool;
+    var el=document.getElementById('ts_'+key.replace(/[^a-z0-9]/gi,'_'));
+    if(el){
+      clearInterval(_toolTimers[key]);delete _toolTimers[key];
+      el.className='tool-status ts-ok ts-flash';
+      el.querySelector('.ts-icon').textContent='✅';
+      if(ms)el.querySelector('.ts-time').textContent=ms+'ms';
+      setTimeout(function(){el.classList.remove('ts-flash')},700);
+    }else{
+      var d=document.createElement('div');
+      d.className='tool-status ts-ok ts-flash';
+      d.innerHTML=`<span class="ts-icon">✅</span> <span class="ts-name">${server}.${tool}</span> ${ms?`<span class="ts-time">${ms}ms</span>`:''}`;
+      document.getElementById('messages').appendChild(d);
+      setTimeout(function(){d.classList.remove('ts-flash')},700);
+    }
+    document.getElementById('messages').scrollTop=99999;
+  }else if(status==='error'){
+    var key=server+'.'+tool;
+    var el=document.getElementById('ts_'+key.replace(/[^a-z0-9]/gi,'_'));
+    if(el){
+      clearInterval(_toolTimers[key]);delete _toolTimers[key];
+      el.className='tool-status ts-error';
+      el.querySelector('.ts-icon').textContent='❌';
+    }
+    document.getElementById('messages').scrollTop=99999;
+  }
 }
 
 function hideTyping(){const t=document.getElementById('typing');if(t)t.remove()}
@@ -717,6 +921,7 @@ function send(){
 
     else if(data.type==='thinking_start'){
       hideTyping();
+      document.querySelector('.chat-input').classList.add('ai-thinking');
       createThinkingBox(data.agent, data.label||data.agent);
       const card=document.querySelector(`.agent-card[data-agent="${data.agent}"]`);
       if(card){document.querySelectorAll('.agent-card').forEach(c=>c.classList.remove('active'));card.classList.add('active')}
@@ -724,10 +929,20 @@ function send(){
     }
 
     else if(data.type==='thinking'){
-      addThinkingLine(data.content);
+      if(data.agent==='physics'&&data.content&&data.content.indexOf('⚡')>=0){
+        var pc=document.createElement('div');
+        pc.className='physics-card';
+        var warnings=data.content.replace(/^⚡\s*物理校验:\s*/,'').split(';').filter(function(w){return w.trim()});
+        pc.innerHTML='<div class="pw-items">'+warnings.map(function(w){return '<div class="pw-item"><b>⚠</b> '+w.trim().replace(/</g,'&lt;')+'</div>'}).join('')+'</div>';
+        document.getElementById('messages').appendChild(pc);
+        document.getElementById('messages').scrollTop=99999;
+      }else{
+        addThinkingLine(data.content);
+      }
     }
 
     else if(data.type==='thinking_end'){
+      document.querySelector('.chat-input').classList.remove('ai-thinking');
       markLastThinkingDone();
       setTimeout(closeThinkingBox, 300);
       if(currentThinkingBox){
@@ -756,6 +971,7 @@ function send(){
     else if(data.type==='tool_result'){
       addToolStatus(data.server, data.tool, 'ok', data.elapsed_ms);
       addEvent(data.server, data.tool, `${data.elapsed_ms}ms`);
+      _totalCalls++;if(data.elapsed_ms)_totalMs+=data.elapsed_ms;
       var k2=data.server.replace(/[^a-z]/gi,'').toLowerCase();
       var runningNode=wfNodes.find(function(n){return n.agent===k2&&n.status==='running'});
       if(runningNode){runningNode.status='done';renderWfNode(runningNode);renderWfEdges()}
@@ -766,14 +982,42 @@ function send(){
 
     else if(data.type==='tool_error'){
       addToolStatus(data.server, data.tool, 'error');
+      var ec=document.createElement('div');
+      ec.className='error-card';
+      ec.innerHTML='<div class="ec-header" onclick="this.parentElement.classList.toggle(\'ec-open\')">'+data.server+'.'+data.tool+' 执行异常</div><div class="ec-body">'+(data.error||'未知错误').replace(/</g,'&lt;')+'</div>';
+      document.getElementById('messages').appendChild(ec);
+      document.getElementById('messages').scrollTop=99999;
+    }
+
+    else if(data.type==='debate'){
+      var dc=document.createElement('div');
+      dc.className='debate-card'+(data.consensus?' dc-pass':'');
+      var critics=data.critics||[];
+      var titleCls=data.consensus?'pass':'fail';
+      var titleTxt=data.consensus?'辩论通过 — 多数共识':'辩论未通过 — 存在异议';
+      var criticsHtml='';
+      critics.forEach(function(c){
+        var score=c.score||5;var pct=Math.max(0,Math.min(100,score*10));
+        var barClr=score>=7?'var(--accent3)':score>=4?'var(--warn)':'var(--danger)';
+        criticsHtml+='<div class="dc-critic">';
+        criticsHtml+='<div class="cr-role" style="color:'+(c.pass?'var(--accent3)':'var(--danger)')+'">'+(c.pass?'✓':'✗')+' '+(c.role||'critic')+'</div>';
+        criticsHtml+='<div class="cr-score"><span style="color:var(--text)">'+score+'/10</span><div class="cr-bar"><div class="cr-bar-fill" style="width:'+pct+'%;background:'+barClr+'"></div></div></div>';
+        if(c.issue)criticsHtml+='<div class="cr-issue">⚠ '+(c.issue+'').replace(/</g,'&lt;').slice(0,80)+'</div>';
+        criticsHtml+='</div>';
+      });
+      dc.innerHTML='<div class="dc-title '+titleCls+'">'+titleTxt+'</div><div class="dc-radar">'+criticsHtml+'</div>';
+      document.getElementById('messages').appendChild(dc);
+      document.getElementById('messages').scrollTop=99999;
     }
 
     else if(data.type==='text'){
-      if(!botEl){botEl=addMsg('bot','');botEl.innerHTML=''}
+      if(!botEl){botEl=addMsg('bot','');botEl.innerHTML='<span class="typing-cursor"></span>'}
       var txt=data.content.replace(/\n/g,'<br>');
       var wfMatch=txt.match(/【执行流程[：:]([^\】]+)】/)||txt.match(/\[workflow[：:]([^\]]+)\]/i);
       if(wfMatch){askWorkflow(wfMatch[1].trim());txt='📋 正在执行编排方案: <b>'+wfMatch[1].trim()+'</b>'}
-      botEl.innerHTML+=txt;
+      var cursor=botEl.querySelector('.typing-cursor');
+      if(cursor){cursor.insertAdjacentHTML('beforebegin',txt)}
+      else{botEl.innerHTML+=txt}
       lastBotText+=data.content;
       document.getElementById('messages').scrollTop=99999;
     }
@@ -787,6 +1031,8 @@ function send(){
       es.close();
       const dur=data.duration_ms||0;
       if(botEl){
+        var cursor=botEl.querySelector('.typing-cursor');
+        if(cursor)cursor.remove();
         botEl.innerHTML+=`<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:10px;color:var(--text-dim);font-family:'JetBrains Mono',monospace">🧠 ${data.react_steps||0} steps &middot; ⚡ ${data.tools_called||0} tools &middot; ${dur}ms</div>`;
       }
       if(lastBotText){
@@ -847,7 +1093,7 @@ function renderGenericResult(tool, server, result){
     var gj=result.geojson||{type:"Feature",geometry:{type:result.geometry_type||"Polygon",coordinates:result.coordinates},properties:{name:tool}};
     try{
       var l=L.geoJSON(gj,{style:{color:"#00d4ff",fillColor:"#00d4ff",fillOpacity:.25,weight:2}}).addTo(map);
-      addMapLayer(l);
+      addMapLayer(l, tool);
       try{map.fitBounds(l.getBounds().pad(.2))}catch(e){}
       h+='<div style="color:#00d4ff;margin:4px 0">🗺️ 已绘制到地图</div>';
       hasViz=true;
@@ -861,7 +1107,7 @@ function renderGenericResult(tool, server, result){
       if(lat&&lng){
         var mk=L.circleMarker([lat,lng],{radius:6,fillColor:'#00ff88',color:'#00ff88',fillOpacity:.8}).addTo(map);
         if(label) mk.bindPopup(String(label));
-        addMapLayer(mk);bnds.push([lat,lng]);
+        addMapLayer(mk,tool);bnds.push([lat,lng]);
       }
     });
     if(bnds.length>1) try{map.fitBounds(bnds)}catch(e){}
@@ -926,9 +1172,14 @@ function renderGenericResult(tool, server, result){
     }
   });
   if(kvHtml){h+='<div style="margin-top:6px">'+kvHtml+'</div>';hasViz=true;}
-  // 7. _generated_tool 标签
+  // 7. _generated_tool 标签 + 代码展示
   if(result._generated_tool){
-    h='<div style="color:#00ff88;font-size:11px;margin-bottom:6px">🤖 自动生成: '+result._generated_tool+'</div>'+h;
+    h='<div style="color:#00ff88;font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px">🤖 自动生成: '+result._generated_tool+'</div>'+h;
+  }
+  if(result._generated_code){
+    var codeStr=String(result._generated_code).replace(/</g,'&lt;');
+    if(codeStr.length>2000) codeStr=codeStr.slice(0,2000)+'\n...';
+    h+='<div class="code-collapse"><div class="cc-header" onclick="this.parentElement.classList.toggle(\'cc-open\')"> 生成代码 ('+codeStr.split("\\n").length+'行)</div><div class="cc-body">'+codeStr+'</div></div>';
   }
   // fallback: 如果没有匹配到任何可视化，显示 JSON
   if(!hasViz){
@@ -944,13 +1195,13 @@ function renderToolResult(tool, server, result){
   const richEl=addMsg('bot','');
   if(result&&result.error){richEl.innerHTML='<span style="color:#ff4444">❌ '+result.error+'</span>';return richEl}
   if(tool==='buffer'&&result&&result.geometry){
-    const l=L.geoJSON({type:"Feature",geometry:result.geometry,properties:{name:"缓冲区"}},{style:{color:"#00d4ff",fillColor:"#00d4ff",fillOpacity:.2,weight:2}}).addTo(map);addMapLayer(l);map.fitBounds(l.getBounds().pad(.2));
+    const l=L.geoJSON({type:"Feature",geometry:result.geometry,properties:{name:"缓冲区"}},{style:{color:"#00d4ff",fillColor:"#00d4ff",fillOpacity:.2,weight:2}}).addTo(map);addMapLayer(l,'缓冲区');map.fitBounds(l.getBounds().pad(.2));
     richEl.innerHTML='<span style="color:var(--accent)">⭕ 缓冲区已自动绘制到地图</span>';
   }else if((tool==='spatial_query'||tool==='overlay')&&result&&result.geometry){
-    const c=tool==='overlay'?'#ff8800':'#00d4ff';const l=L.geoJSON({type:"Feature",geometry:result.geometry,properties:{name:tool}},{style:{color:c,fillColor:c,fillOpacity:.2,weight:2}}).addTo(map);addMapLayer(l);map.fitBounds(l.getBounds().pad(.2));
+    const c=tool==='overlay'?'#ff8800':'#00d4ff';const l=L.geoJSON({type:"Feature",geometry:result.geometry,properties:{name:tool}},{style:{color:c,fillColor:c,fillOpacity:.2,weight:2}}).addTo(map);addMapLayer(l,tool);map.fitBounds(l.getBounds().pad(.2));
     richEl.innerHTML='<span style="color:'+c+'">📐 '+(tool==='overlay'?'叠加分析':'空间查询')+'结果已绘制到地图</span>';
   }else if(tool==='geometry_properties'&&result&&result.bounds){
-    const b=result.bounds;const rect=L.rectangle([[b[1],b[0]],[b[3],b[2]]],{color:'#00d4ff',fillOpacity:.08,weight:1,dashArray:'5 5'}).addTo(map);addMapLayer(rect);map.fitBounds(rect.getBounds().pad(.1));
+    const b=result.bounds;const rect=L.rectangle([[b[1],b[0]],[b[3],b[2]]],{color:'#00d4ff',fillOpacity:.08,weight:1,dashArray:'5 5'}).addTo(map);addMapLayer(rect,'几何属性');map.fitBounds(rect.getBounds().pad(.1));
     richEl.innerHTML='<span style="color:var(--accent)">📏 几何: '+result.geometry_type+' 面积='+(result.area_m2||'?').toFixed?result.area_m2.toFixed(1):'?'+'m²</span>';
   }else if(tool==='render_map'&&result&&result.image_base64){
     richEl.innerHTML='<img src="data:image/png;base64,'+result.image_base64+'" alt="map" style="max-width:100%;border-radius:6px"/>';
@@ -967,17 +1218,17 @@ function renderToolResult(tool, server, result){
     svg+='<path d="'+d+'" fill="none" stroke="#00ccff" stroke-width="2"/><text x="10" y="10" fill="#667" font-size="9">SWMM '+result.node_id+'</text></svg>';
     richEl.innerHTML='<div style="color:var(--accent)">🔧 SWMM模拟完成: '+result.node_id+'</div>'+svg;
   }else if(tool==='flood_inundation_map'&&result&&result.geojson){
-    const l=L.geoJSON(result.geojson,{style:{color:'#ff4444',fillColor:'#ff4444',fillOpacity:.3,weight:1}}).addTo(map);addMapLayer(l);try{map.fitBounds(l.getBounds().pad(.1))}catch(e){};
+    const l=L.geoJSON(result.geojson,{style:{color:'#ff4444',fillColor:'#ff4444',fillOpacity:.3,weight:1}}).addTo(map);addMapLayer(l,'淹没分析');try{map.fitBounds(l.getBounds().pad(.1))}catch(e){};
     richEl.innerHTML='<span style="color:#ff4444">🌊 淹没范围已绘制到地图 ('+(result.flooded_area_km2||0).toFixed(1)+'km²)</span>';
     window._lastInundation=result;
   }else if(tool==='flood_warning'&&result){
     richEl.innerHTML='<div style="padding:10px 14px;border-radius:8px;background:#ff444411;border:1px solid #ff444433"><b style="color:#ff4444">⚠️ 洪水预警</b><br><span style="font-size:12px">'+result.warning_level+' | '+result.message+'</span></div>';
   }else if(tool==='flood_risk_zones'&&result&&result.zones){
     const colors={high:'#ff4444',medium:'#ffaa00',low:'#00ff88'};
-    result.zones.forEach(z=>{if(z.geometry){const l=L.geoJSON({type:"Feature",geometry:z.geometry},{style:{color:colors[z.risk]||'#888',fillColor:colors[z.risk]||'#888',fillOpacity:.25,weight:1}}).addTo(map);addMapLayer(l)}});
+    result.zones.forEach(z=>{if(z.geometry){const l=L.geoJSON({type:"Feature",geometry:z.geometry},{style:{color:colors[z.risk]||'#888',fillColor:colors[z.risk]||'#888',fillOpacity:.25,weight:1}}).addTo(map);addMapLayer(l,'风险:'+z.risk)}});
     richEl.innerHTML='<span style="color:#ff4444">🗺️ 风险分区已绘制</span>';
   }else if(tool==='watershed_delineate'&&result&&result.boundary_geojson){
-    const l=L.geoJSON(result.boundary_geojson,{style:{color:"#7c3aed",fillColor:"#7c3aed",fillOpacity:.15,weight:2}}).addTo(map);addMapLayer(l);try{map.fitBounds(l.getBounds().pad(.1))}catch(e){};
+    const l=L.geoJSON(result.boundary_geojson,{style:{color:"#7c3aed",fillColor:"#7c3aed",fillOpacity:.15,weight:2}}).addTo(map);addMapLayer(l,'流域边界');try{map.fitBounds(l.getBounds().pad(.1))}catch(e){};
     let info='<span style="color:#7c3aed">🌊 流域已绘制到地图</span>';
     if(result.area_km2)info+='<div style="font-size:11px;margin-top:4px">面积: '+result.area_km2.toFixed(1)+'km²</div>';
     if(result.outlet)info+='<div style="font-size:11px">出口: '+result.outlet.lat.toFixed(4)+', '+result.outlet.lon.toFixed(4)+'</div>';
@@ -988,19 +1239,30 @@ function renderToolResult(tool, server, result){
     if(result.elevation_range)info+='<div style="font-size:12px">高程: '+result.elevation_range[0]+'~'+result.elevation_range[1]+'m</div>';
     richEl.innerHTML=info;
   }else if(tool==='flow_accumulation'&&result){
-    if(result.stream_geojson){const l=L.geoJSON(result.stream_geojson,{style:{color:'#00ccff',weight:2,opacity:.8}}).addTo(map);addMapLayer(l);try{map.fitBounds(l.getBounds().pad(.1))}catch(e){}}
+    if(result.stream_geojson){const l=L.geoJSON(result.stream_geojson,{style:{color:'#00ccff',weight:2,opacity:.8}}).addTo(map);addMapLayer(l,'河网');try{map.fitBounds(l.getBounds().pad(.1))}catch(e){}}
     let info='<div style="color:#00ccff">🏞️ 河网提取完成</div>';
     if(result.stream_count)info+='<div style="font-size:12px;margin-top:4px">河流: '+result.stream_count+'条 | 最高Strahler: '+(result.max_strahler||'-')+'</div>';
     richEl.innerHTML=info;
   }else if(tool==='dem_render'&&result&&result.hillshade_image){
     if(result.bounds){
       const b=result.bounds;const bounds=[[b[1],b[0]],[b[3],b[2]]];
-      const overlay=L.imageOverlay('data:image/png;base64,'+result.hillshade_image,bounds,{opacity:.7}).addTo(map);addMapLayer(overlay);map.fitBounds(bounds);
+      const overlay=L.imageOverlay('data:image/png;base64,'+result.hillshade_image,bounds,{opacity:.7}).addTo(map);addMapLayer(overlay,'山体阴影');map.fitBounds(bounds);
     }
     if(result.contour_geojson&&result.contour_geojson.features){result.contour_geojson.features.forEach(f=>{L.geoJSON(f,{style:{color:'#445566',weight:.8,opacity:.6,dashArray:'2,3'}}).addTo(map)})}
     let info='<div style="color:var(--text-dim)">🏔️ DEM地形渲染</div>';
     if(result.elevation_range)info+='<div style="margin-top:4px">高程: '+result.elevation_range[0]+'~'+result.elevation_range[1]+'m</div>';
     richEl.innerHTML=info;
+  }else if(tool==='scatter_interpolate'&&result){
+    if(result.image_base64&&result.bounds){
+      const b=result.bounds;const bounds=[[b[0],b[1]],[b[2],b[3]]];
+      const overlay=L.imageOverlay('data:image/png;base64,'+result.image_base64,bounds,{opacity:.75}).addTo(map);addMapLayer(overlay,'插值热力图');map.fitBounds(bounds);
+      richEl.innerHTML='<div style="color:#00d4ff">🗺️ 插值热力图已叠加到地图</div><div style="font-size:11px;margin-top:4px;color:var(--text-dim)">'+result.method+' | '+result.input_points+'点 | '+result.valid_cells+'有效格点</div><div style="font-size:11px;color:var(--text-dim)">范围: '+result.z_min.toFixed(1)+'~'+result.z_max.toFixed(1)+'</div>';
+    }else{
+      let info='<div style="color:#00d4ff">📊 插值完成: '+result.method+'</div>';
+      info+='<div style="font-size:11px;margin-top:4px;color:var(--text-dim)">输入: '+result.input_points+'点 | 网格: '+result.grid_resolution+'</div>';
+      if(result.z_min!=null)info+='<div style="font-size:11px;color:var(--text-dim)">值域: '+result.z_min.toFixed(2)+' ~ '+result.z_max.toFixed(2)+'</div>';
+      richEl.innerHTML=info;
+    }
   }else if(tool==='terrain_profile'&&result&&result.profile){
     const pts=result.profile;let svg='<svg viewBox="0 0 400 130" style="width:100%;max-width:400px;border-radius:6px;background:#0a0e1a">';const maxE=Math.max(...pts.map(p=>p.elevation_m));const minE=Math.min(...pts.map(p=>p.elevation_m));const range=maxE-minE||1;let pathD='',fillD='';
     pts.forEach((p,i)=>{const x=i/(pts.length-1)*380+10;const y=110-((p.elevation_m-minE)/range)*90-5;pathD+=(i===0?'M':'L')+' '+x+' '+y;fillD+=(i===0?'M '+x+' 110 L '+x+' '+y:' L '+x+' '+y)});
@@ -1012,7 +1274,7 @@ function renderToolResult(tool, server, result){
     result.results.slice(0,8).forEach(e=>{h+='<div style="font-size:12px;margin-top:4px">• '+(e.surface||e.city||'?')+': '+(e.n_typical||e.cn_amc2||JSON.stringify(e).slice(0,60))+'</div>'});
     h+='</div>';richEl.innerHTML=h;
   }else if(tool==='import_network'&&result){
-    if(result.geojson&&result.geojson.features){const netLayer=L.geoJSON(result.geojson,{style:{color:'#00d4ff',weight:3,opacity:.8},pointToLayer:(f,ll)=>L.circleMarker(ll,{radius:6,fillColor:'#00ff88',color:'#00ff88',fillOpacity:.8})}).addTo(map);addMapLayer(netLayer);try{map.fitBounds(netLayer.getBounds().pad(.2))}catch(e){}}
+    if(result.geojson&&result.geojson.features){const netLayer=L.geoJSON(result.geojson,{style:{color:'#00d4ff',weight:3,opacity:.8},pointToLayer:(f,ll)=>L.circleMarker(ll,{radius:6,fillColor:'#00ff88',color:'#00ff88',fillOpacity:.8})}).addTo(map);addMapLayer(netLayer,'管网');try{map.fitBounds(netLayer.getBounds().pad(.2))}catch(e){}}
     richEl.innerHTML='<span style="color:#00d4ff">📁 管网导入: '+result.feature_count+'要素</span>';
   }else if(tool==='hydrodynamic_2d_sim'&&result&&result.frames){
     renderHydroSimulation(result);
@@ -1022,7 +1284,7 @@ function renderToolResult(tool, server, result){
     var fc=result.geojson;
     if(fc.features&&fc.features.length>0){
       var fLayer=L.geoJSON(fc,{style:function(f){return{color:'rgba(0,150,255,0.6)',weight:1,fillColor:'rgba(0,180,255,0.3)',fillOpacity:0.5}}}).addTo(map);
-      addMapLayer(fLayer);hydroLayers.push(fLayer);
+      addMapLayer(fLayer,'洪水淹没');hydroLayers.push(fLayer);
       try{map.fitBounds(fLayer.getBounds().pad(.1))}catch(e){}
     }
     var pct=result.inundation_pct?(result.inundation_pct*100).toFixed(1):'?';
@@ -1486,13 +1748,21 @@ window.askWorkflow=function(name){
 };
 
 var svcCallCounts={router:0,planner:0,react:0,reflect:0,gis:0,data:0,knowledge:0,map:0,hydro:0,flood:0,raster:0};
+var _totalCalls=0, _totalMs=0, _sessionMs=0;
 window.toggleDash=function(){document.getElementById('dashPanel').classList.toggle('hidden');if(!document.getElementById('dashPanel').classList.contains('hidden'))refreshDash()};
 function refreshDash(){
   var body=document.getElementById('dashBody');
   if(!body||document.getElementById('dashPanel').classList.contains('hidden'))return;
+  var avgMs=_totalCalls>0?Math.round(_totalMs/_totalCalls):0;
+  var html='<div class="dash-svc" style="border-color:rgba(124,58,237,.2);background:rgba(124,58,237,.06)">';
+  html+='<div class="ds-head"><span class="ds-name" style="color:var(--accent2)">📊 会话统计</span></div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:6px">';
+  html+='<div style="text-align:center"><div style="font-size:18px;font-weight:700;color:var(--accent)">'+_totalCalls+'</div><div style="font-size:9px;color:var(--text-dim)">总调用</div></div>';
+  html+='<div style="text-align:center"><div style="font-size:18px;font-weight:700;color:var(--accent3)">'+avgMs+'ms</div><div style="font-size:9px;color:var(--text-dim)">平均耗时</div></div>';
+  html+='<div style="text-align:center"><div style="font-size:18px;font-weight:700;color:var(--warn)">'+Math.round(_sessionMs/1000)+'s</div><div style="font-size:9px;color:var(--text-dim)">会话时长</div></div>';
+  html+='</div></div>';
   var svcs=['router','gis','data','knowledge','map','hydro','flood','raster'];
   var ports=[3000,5001,5002,5003,5004,5005,5006,5007];
-  var html='';
   for(var i=0;i<svcs.length;i++){
     var s=svcs[i];var m=SVC_META[s];var calls=svcCallCounts[s]||0;var bar=Math.min(calls*10,100);
     html+='<div class="dash-svc"><div class="ds-head"><span class="ds-name">'+m.label+'</span><span class="ds-dot" id="dot-'+s+'"></span></div>';
