@@ -716,13 +716,15 @@ STRICT RULES:
 5. For Voronoi: MUST filter out regions containing -1, MUST clip vertices to valid range
 6. Output ONLY code, NO imports needed (math,json,np,scipy already available), NO explanation
 7. NEVER use emoji or non-ASCII characters
-
-Return a dict with result fields:
-- GeoJSON: {"geojson": {"type":"FeatureCollection","features":[...]}}
-- Curve: {"data_points": [{"x":..., "y":..., "label":...}]}
-- Bar chart: {"data_points": [...], "chart_type": "bar"}
-- Points: {"points": [{"lat":..., "lng":..., "label":...}]}
-- Table: {"table": [{"col1": val, ...}]}
+8. CRITICAL: The return dict MUST use EXACTLY these lowercase keys at the TOP level:
+   - "geojson": {"type":"FeatureCollection","features":[...]}
+   - "points": [{"lat":float, "lng":float, "label":str}]
+   - "data_points": [{"x":num, "y":num, "label":str}]
+   - "table": [{"col1": val, ...}]
+   - "chart_type": "bar" (optional)
+   Do NOT nest these under uppercase keys like "GeoJSON" or "Points".
+   CORRECT: return {"geojson": geojson_obj, "points": [...], "data_points": [...]}
+   WRONG: return {"GeoJSON": {"geojson": geojson_obj}, "Points": {"points": [...]}}
 
 Available: math, json, numpy(as np), scipy.spatial.Voronoi"""
 
@@ -1217,6 +1219,30 @@ ROUTING_RULES.extend([
 
 # ── Internal tool handler ─────────────────────────────────────────────
 
+def _normalize_auto_tool_result(result: dict) -> dict:
+    viz_keys = {"geojson", "points", "data_points", "table", "chart_type", "image_base64", "time_series"}
+    top_keys = set(str(k).lower() for k in result.keys())
+    has_viz = bool(top_keys & viz_keys)
+    if has_viz:
+        return result
+    flat = {}
+    for k, v in result.items():
+        if k.startswith("_"):
+            flat[k] = v
+            continue
+        if isinstance(v, dict):
+            for vk, vv in v.items():
+                if vk.lower() in viz_keys or vk in viz_keys:
+                    flat[vk] = vv
+                else:
+                    flat[f"{k}_{vk}"] = vv
+        elif isinstance(v, list):
+            flat[k.lower()] = v
+        else:
+            flat[k] = v
+    return flat
+
+
 async def _handle_internal_tool(tool_name: str, args: dict, user_msg: str = "") -> dict:
     if tool_name == "weather_forecast":
         return await _get_weather(args.get("latitude", 33.19), args.get("longitude", 104.89), args.get("forecast_days", 3))
@@ -1243,6 +1269,7 @@ async def _handle_internal_tool(tool_name: str, args: dict, user_msg: str = "") 
             return {"error": f"工具生成失败(3次重试): {requirement[:80]}", "logs": logs}
         result["_generated_tool"] = gen["tool_name"]
         result["_generated_file"] = gen["file"]
+        result = _normalize_auto_tool_result(result)
         return result
     return {"error": f"Unknown internal tool: {tool_name}"}
 
