@@ -60,7 +60,7 @@ async def chat_stream_generator(q: str, history: str = "", workflows: str = "", 
 
     memory_ctx = ""
     episodes = memory.recall_episodes(message)
-    facts = memory.recall_facts()
+    facts = memory.recall_facts(message)
     if facts or episodes:
         fact_str = "; ".join(f"{f['key']}={f['value']}" for f in facts[:5])
         ep_str = "; ".join(e["summary"][:60] for e in episodes[:2])
