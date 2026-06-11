@@ -142,12 +142,22 @@ html,body{height:100%;font-family:'Noto Sans SC',sans-serif;background:var(--bg-
 .debate-card .dc-critic .cr-issue{color:var(--warn);margin-top:2px}
 .debate-card.dc-pass{border-color:rgba(16,185,129,.2);background:rgba(16,185,129,.04)}
 
+.map-click-popup .leaflet-popup-content-wrapper{background:rgba(13,19,33,.95)!important;border:1px solid rgba(0,212,255,.2)!important;border-radius:10px!important;box-shadow:0 4px 24px rgba(0,0,0,.5)!important}
+.map-click-popup .leaflet-popup-tip{background:rgba(13,19,33,.95)!important;border:1px solid rgba(0,212,255,.2)!important}
+.map-click-popup .leaflet-popup-content{margin:10px 12px!important}
+.map-click-popup button:hover{border-color:rgba(0,212,255,.5)!important;background:rgba(0,212,255,.15)!important}
+
 /* === Physics Warning === */
 .physics-card{border:1px solid rgba(245,158,11,.25);border-radius:var(--radius-sm);background:rgba(245,158,11,.06);padding:8px 14px;margin:6px 0;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--warn);animation:slideUp .35s ease;display:flex;align-items:center;gap:8px}
 .physics-card::before{content:'⚡';font-size:14px}
 .physics-card .pw-items{display:flex;flex-direction:column;gap:2px}
 .physics-card .pw-item{color:var(--text-dim);font-size:10px}
 .physics-card .pw-item b{color:var(--warn)}
+
+#export-menu.show{display:block!important}
+
+#conv-list::-webkit-scrollbar{width:3px}
+#conv-list::-webkit-scrollbar-thumb{background:rgba(0,212,255,.2);border-radius:2px}
 
 /* === Code Collapse === */
 .code-collapse{border:1px solid var(--border);border-radius:var(--radius-sm);margin:6px 0;overflow:hidden;background:rgba(6,10,19,.6)}
@@ -188,11 +198,16 @@ html,body{height:100%;font-family:'Noto Sans SC',sans-serif;background:var(--bg-
 .thinking-box .th-header .th-spinner{display:inline-block;width:10px;height:10px;border:2px solid rgba(124,58,237,.2);border-top-color:var(--accent2);border-radius:50%;animation:spin .6s linear infinite}
 .thinking-box .th-progress{height:2px;background:rgba(124,58,237,.1);border-radius:1px;margin-bottom:6px;overflow:hidden}
 .thinking-box .th-progress-bar{height:100%;background:linear-gradient(90deg,#7c3aed,#00d4ff);border-radius:1px;transition:width .3s ease;width:0}
-.thinking-box .th-line{color:var(--text-dim);padding-left:16px;position:relative;animation:thinkLineIn .3s ease;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.thinking-box .th-line{color:var(--text-dim);padding:1px 0 1px 16px;position:relative;animation:thinkLineIn .3s ease;white-space:pre-wrap;overflow-wrap:break-word;font-size:11px;line-height:1.5}
 @keyframes thinkLineIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
 .thinking-box .th-line::before{content:'>';position:absolute;left:0;color:var(--accent2);opacity:.4;font-weight:700}
 .thinking-box .th-line.active{color:var(--text);text-shadow:0 0 6px rgba(0,212,255,.12)}
 .thinking-box .th-line.done{color:var(--accent3)}
+.thinking-box .th-line.step-header{color:#00d4ff;font-weight:600;margin-top:4px;font-size:11px;border-top:1px solid rgba(0,212,255,.1);padding-top:4px}
+.thinking-box .th-line.step-goal{color:#7c3aed;font-style:italic}
+.thinking-box .th-line.step-decision{color:#ff8800}
+.thinking-box .th-line.step-error{color:#ff4444}
+.thinking-box .th-line.step-ok{color:#00ff88}
 
 .divider-line{display:flex;align-items:center;gap:12px;margin:12px 0;font-size:11px;color:var(--accent);font-family:'JetBrains Mono',monospace;letter-spacing:1.5px;text-shadow:0 0 8px rgba(0,212,255,.3);animation:dividerIn .4s ease}
 @keyframes dividerIn{from{opacity:0;transform:scaleX(.9)}to{opacity:1;transform:scaleX(1)}}
@@ -449,7 +464,12 @@ html,body{height:100%;font-family:'Noto Sans SC',sans-serif;background:var(--bg-
       <div class="name"><span class="emoji">&#9968;</span> Raster 地形分析</div>
       <div class="caps">DEM坡度 &middot; 汇流累积 &middot; 流域提取</div>
     </div>
-    <h3 style="margin-top:auto">系统信息</h3>
+    <h3 style="margin-top:auto" id="conv-header">对话历史</h3>
+    <div style="padding:0 8px 4px;display:flex;gap:4px">
+      <button onclick="newConversation()" style="flex:1;padding:5px;border-radius:6px;border:1px solid rgba(0,212,255,.2);background:rgba(0,212,255,.06);color:#00d4ff;font-size:10px;cursor:pointer">＋ 新对话</button>
+    </div>
+    <div id="conv-list" style="padding:0 8px 8px;max-height:140px;overflow-y:auto;font-size:11px"></div>
+    <h3>系统信息</h3>
     <div style="padding:0 12px 12px;font-size:11px;color:var(--text-dim);font-family:'JetBrains Mono',monospace;line-height:1.8">
       <div>MCP Servers: <span id="srv-count" style="color:var(--accent3)">-</span></div>
       <div>Tools: <span id="tool-count" style="color:var(--accent)">-</span></div>
@@ -517,6 +537,14 @@ html,body{height:100%;font-family:'Noto Sans SC',sans-serif;background:var(--bg-
       </label>
       <input id="input" type="text" placeholder="输入水利分析指令..." onkeydown="if(event.key==='Enter')send()">
       <button onclick="send()">&#10148;</button>
+      <div style="position:relative;display:inline-block">
+        <button onclick="document.getElementById('export-menu').classList.toggle('show')" style="width:42px;height:42px;border-radius:var(--radius);background:var(--bg-input);border:1px solid var(--border);color:var(--text-dim);font-size:14px;cursor:pointer" title="导出">&#128190;</button>
+        <div id="export-menu" style="display:none;position:absolute;bottom:48px;right:0;background:rgba(13,19,33,.95);border:1px solid rgba(0,212,255,.2);border-radius:8px;padding:6px 0;min-width:160px;z-index:9999;box-shadow:0 8px 32px rgba(0,0,0,.5)">
+          <button onclick="exportGeoJSON();document.getElementById('export-menu').classList.remove('show')" style="display:block;width:100%;padding:8px 14px;border:none;background:transparent;color:#e2e8f0;text-align:left;font-size:12px;cursor:pointer" onmouseover="this.style.background='rgba(0,212,255,.1)'" onmouseout="this.style.background='transparent'">📄 导出当前GeoJSON</button>
+          <button onclick="exportAllGeoJSON();document.getElementById('export-menu').classList.remove('show')" style="display:block;width:100%;padding:8px 14px;border:none;background:transparent;color:#e2e8f0;text-align:left;font-size:12px;cursor:pointer" onmouseover="this.style.background='rgba(0,212,255,.1)'" onmouseout="this.style.background='transparent'">🗺️ 导出全部GeoJSON</button>
+          <button onclick="exportReport();document.getElementById('export-menu').classList.remove('show')" style="display:block;width:100%;padding:8px 14px;border:none;background:transparent;color:#e2e8f0;text-align:left;font-size:12px;cursor:pointer" onmouseover="this.style.background='rgba(0,212,255,.1)'" onmouseout="this.style.background='transparent'">📊 导出分析报告</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -536,12 +564,179 @@ let mapLayers=[];
 let currentThinkingBox=null;
 let currentThinkingLines=[];
 let chatHistory=[];
+var _curConvId=parseInt(localStorage.getItem('sai_conv_id'))||0;
+var _lastExportData={tool:'',server:'',result:null,ts:0};
+var _allExportData=[];
+let lastToolContext={tool:'',args:{},result:{}};
+try{chatHistory=JSON.parse(localStorage.getItem('sai_chat_history')||'[]')}catch(e){chatHistory=[]}
+function restoreConversation(){
+  if(!_curConvId)return;
+  fetch(API+'/api/conversations/'+_curConvId+'/messages').then(function(r){return r.json()}).then(function(d){
+    if(!d.messages||!d.messages.length)return;
+    var chatBox=document.getElementById('chat-messages');
+    chatBox.innerHTML='';
+    chatHistory=[];
+    d.messages.forEach(function(m){
+      if(m.role==='user'){
+        addMsg('user',m.content);
+        chatHistory.push({role:'user',content:m.content});
+      }else if(m.role==='assistant'){
+        addMsg('bot',m.content);
+        chatHistory.push({role:'assistant',content:m.content});
+      }
+    });
+    saveChatHistory();
+    chatBox.scrollTop=chatBox.scrollHeight;
+  }).catch(function(){});
+}
+restoreConversation();
+loadConvList();
+
+document.addEventListener('click',function(e){
+  var m=document.getElementById('export-menu');
+  if(m&&m.classList.contains('show')&&!e.target.closest('#export-menu')&&!e.target.closest('[title="导出"]')){m.classList.remove('show')}
+});
+
+function loadConvList(){
+  fetch(API+'/api/conversations').then(function(r){return r.json()}).then(function(d){
+    var el=document.getElementById('conv-list');
+    if(!el||!d.conversations)return;
+    el.innerHTML='';
+    d.conversations.forEach(function(c){
+      var active=c.id===_curConvId;
+      var div=document.createElement('div');
+      div.style.cssText='display:flex;align-items:center;gap:4px;padding:4px 6px;border-radius:6px;margin-bottom:2px;cursor:pointer;transition:background .15s;'+(active?'background:rgba(0,212,255,.12);border:1px solid rgba(0,212,255,.2)':'border:1px solid transparent');
+      div.onmouseover=function(){this.style.background='rgba(0,212,255,.08)'};
+      div.onmouseout=function(){this.style.background=active?'rgba(0,212,255,.12)':'transparent'};
+      var titleSpan=document.createElement('span');
+      titleSpan.style.cssText='flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:'+(active?'#00d4ff':'#94a3b8');
+      titleSpan.textContent=c.title||'对话 '+c.id;
+      titleSpan.onclick=function(){switchConversation(c.id)};
+      div.appendChild(titleSpan);
+      var delBtn=document.createElement('span');
+      delBtn.style.cssText='color:#667;cursor:pointer;font-size:12px;padding:0 2px';
+      delBtn.textContent='✕';
+      delBtn.onclick=function(e){e.stopPropagation();deleteConversation(c.id)};
+      div.appendChild(delBtn);
+      el.appendChild(div);
+    });
+  }).catch(function(){});
+}
+
+function newConversation(){
+  var title='对话 '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
+  fetch(API+'/api/conversations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:title})}).then(function(r){return r.json()}).then(function(d){
+    _curConvId=d.id;localStorage.setItem('sai_conv_id',String(_curConvId));
+    document.getElementById('chat-messages').innerHTML='';
+    chatHistory=[];saveChatHistory();
+    loadConvList();
+  });
+}
+
+function switchConversation(id){
+  _curConvId=id;localStorage.setItem('sai_conv_id',String(_curConvId));
+  restoreConversation();
+  loadConvList();
+}
+
+function deleteConversation(id){
+  if(!confirm('删除此对话？'))return;
+  fetch(API+'/api/conversations/'+id,{method:'DELETE'}).then(function(){loadConvList()});
+  if(id===_curConvId){newConversation()}
+}
+
+function exportGeoJSON(){
+  if(!_lastExportData.result){alert('暂无可导出的数据');return}
+  var r=_lastExportData.result;
+  var gj=r.geojson||null;
+  if(r.coordinates){gj={type:"Feature",geometry:{type:r.geometry_type||"Polygon",coordinates:r.coordinates},properties:{name:_lastExportData.tool}}}
+  if(r.boundary_geojson&&!gj){gj=r.boundary_geojson}
+  if(r.stream_geojson&&!gj){gj=r.stream_geojson}
+  if(r.contour_geojson&&!gj){gj=r.contour_geojson}
+  if(!gj){alert('当前结果不包含GeoJSON数据');return}
+  var blob=new Blob([JSON.stringify(gj,null,2)],{type:'application/geo+json'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download=_lastExportData.tool+'_'+new Date().toISOString().slice(0,10)+'.geojson';
+  a.click();URL.revokeObjectURL(a.href);
+}
+
+function exportReport(){
+  var msgs=document.querySelectorAll('#chat-messages .msg');
+  var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>S-AI 分析报告</title>'+
+    '<style>body{font-family:"Microsoft YaHei",sans-serif;max-width:900px;margin:0 auto;padding:40px 20px;color:#333;background:#fff}'+
+    'h1{color:#1a1a2e;border-bottom:2px solid #00d4ff;padding-bottom:8px}'+
+    '.msg{margin:12px 0;padding:12px 16px;border-radius:8px}'+
+    '.msg.user{background:#f0f7ff;border-left:3px solid #0066cc}'+
+    '.msg.bot{background:#f8f8f8;border-left:3px solid #00cc88}'+
+    '.meta{font-size:11px;color:#999;margin-bottom:4px}'+
+    '.footer{text-align:center;color:#999;font-size:11px;margin-top:30px;border-top:1px solid #eee;padding-top:10px}'+
+    'table{border-collapse:collapse;width:100%;margin:8px 0}th,td{border:1px solid #ddd;padding:6px 10px;text-align:left;font-size:12px}th{background:#f0f0f0}'+
+    '</style></head><body>';
+  html+='<h1>S-AI 空间智能分析报告</h1>';
+  html+='<p style="color:#666;font-size:12px">生成时间: '+new Date().toLocaleString('zh-CN')+'</p>';
+  msgs.forEach(function(m){
+    var cls=m.classList.contains('user-msg')?'user':'bot';
+    var txt=m.textContent||'';
+    if(txt.length>2000)txt=txt.slice(0,2000)+'...';
+    html+='<div class="msg '+cls+'"><div class="meta">'+(cls==='user'?'👤 用户':'🤖 S-AI')+'</div><div>'+txt.replace(/</g,'&lt;')+'</div></div>';
+  });
+  html+='<div class="footer">S-AI 空间智能平台 | LUOBIN-PI Research Lab</div></body></html>';
+  var blob=new Blob([html],{type:'text/html;charset=utf-8'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='S-AI_Report_'+new Date().toISOString().slice(0,10)+'.html';
+  a.click();URL.revokeObjectURL(a.href);
+}
+
+function exportAllGeoJSON(){
+  if(!_allExportData.length){alert('暂无可导出的数据');return}
+  var fc={type:"FeatureCollection",features:[]};
+  _allExportData.forEach(function(d){
+    var r=d.result;var gj=null;
+    if(r.geojson)gj=r.geojson;
+    if(r.coordinates)gj={type:"Feature",geometry:{type:r.geometry_type||"Polygon",coordinates:r.coordinates},properties:{name:d.tool}};
+    if(r.boundary_geojson&&!gj){gj=r.boundary_geojson}
+    if(r.stream_geojson&&!gj){gj=r.stream_geojson}
+    if(gj){
+      if(gj.type==='FeatureCollection'){gj.features.forEach(function(f){f.properties=f.properties||{};f.properties.source=d.tool;fc.features.push(f)})}
+      else if(gj.type==='Feature'){gj.properties=gj.properties||{};gj.properties.source=d.tool;fc.features.push(gj)}
+      else{fc.features.push({type:"Feature",geometry:gj,properties:{source:d.tool}})}
+    }
+  });
+  if(!fc.features.length){alert('当前结果不包含GeoJSON数据');return}
+  var blob=new Blob([JSON.stringify(fc,null,2)],{type:'application/geo+json'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='S-AI_All_'+new Date().toISOString().slice(0,10)+'.geojson';
+  a.click();URL.revokeObjectURL(a.href);
+}
+function saveChatHistory(){try{localStorage.setItem('sai_chat_history',JSON.stringify(chatHistory.slice(-40)))}catch(e){}}
+function saveToolCtx(tool,args,result){lastToolContext={tool:tool,args:JSON.parse(JSON.stringify(args)),result_keys:Object.keys(result||{}),timestamp:Date.now()};try{localStorage.setItem('sai_last_tool',JSON.stringify(lastToolContext))}catch(e){}}
+try{lastToolContext=JSON.parse(localStorage.getItem('sai_last_tool')||'{}')}catch(e){}
 var _sessionStart=Date.now();
 setInterval(function(){_sessionMs=Date.now()-_sessionStart;if(typeof refreshDash==='function')refreshDash()},5000);
 
 const map=L.map('map',{zoomControl:true,attributionControl:false}).setView([39.9042,116.4074],11);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:19}).addTo(map);
 map.on('mousemove',e=>{document.getElementById('map-coords').textContent=`LatLng: ${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`});
+
+var _mapClickPopup=null;
+map.on('click',function(e){
+  var lat=e.latlng.lat.toFixed(5);
+  var lng=e.latlng.lng.toFixed(5);
+  if(_mapClickPopup){map.closePopup(_mapClickPopup)}
+  var popup=L.popup({className:'map-click-popup',maxWidth:220}).setLatLng(e.latlng).setContent(
+    '<div style="font-family:JetBrains Mono,monospace;font-size:11px;color:#e2e8f0">'+
+    '<div style="color:#00d4ff;font-weight:700;margin-bottom:6px">📍 '+lat+', '+lng+'</div>'+
+    '<div style="display:flex;flex-direction:column;gap:4px">'+
+    '<button onclick="askText(\'查询高程 '+lat+' '+lng+'\')" style="padding:4px 8px;border-radius:4px;border:1px solid #00d4ff33;background:#00d4ff0d;color:#e2e8f0;cursor:pointer;font-size:10px;text-align:left">⛰️ 查询高程</button>'+
+    '<button onclick="askText(\'坡度分析 '+lat+' '+lng+'\')" style="padding:4px 8px;border-radius:4px;border:1px solid #00ff8833;background:#00ff880d;color:#e2e8f0;cursor:pointer;font-size:10px;text-align:left">📐 坡度分析</button>'+
+    '<button onclick="askText(\'地形剖面经过点 '+lat+' '+lng+'\')" style="padding:4px 8px;border-radius:4px;border:1px solid #7c3aed33;background:#7c3aed0d;color:#e2e8f0;cursor:pointer;font-size:10px;text-align:left">📏 地形剖面</button>'+
+    '<button onclick="askText(\'分析该位置('+lat+','+lng+')的汇水情况\')" style="padding:4px 8px;border-radius:4px;border:1px solid #ff880033;background:#ff88000d;color:#e2e8f0;cursor:pointer;font-size:10px;text-align:left">🌊 汇水分析</button>'+
+    '<button onclick="askText(\'淹没分析 水位 '+lat+' '+lng+'\')" style="padding:4px 8px;border-radius:4px;border:1px solid #ff444433;background:#ff44440d;color:#e2e8f0;cursor:pointer;font-size:10px;text-align:left">💧 淹没模拟</button>'+
+    '</div></div>'
+  );
+  _mapClickPopup=popup;
+  popup.openOn(map);
+});
 
 let _layerId=0;
 let _layerMeta=[];
@@ -662,7 +857,14 @@ function createThinkingBox(agent, label){
 function addThinkingLine(content, state='active'){
   if(!currentThinkingBox) return;
   const line=document.createElement('div');
-  line.className=`th-line ${state}`;
+  var cls='th-line';
+  if(content.match(/^━━━/))cls+=' step-header';
+  else if(content.match(/^📋/))cls+=' step-goal';
+  else if(content.match(/^🔍|^🎯|^🔄/))cls+=' step-decision';
+  else if(content.match(/^❌/))cls+=' step-error';
+  else if(content.match(/^✅|^📈/))cls+=' step-ok';
+  if(state==='done')cls+=' done';
+  line.className=cls;
   line.textContent=content;
   currentThinkingBox.appendChild(line);
   currentThinkingLines.push(line);
@@ -904,11 +1106,15 @@ function send(){
   if(matched){askWorkflow(matched);return}
 
   chatHistory.push({role:'user',content:msg});
+  saveChatHistory();
   const recentHistory=chatHistory.slice(-10);
 
   var wfList=Object.keys(JSON.parse(localStorage.getItem('wf_workflows')||'{}'));
   var wfParam=wfList.length?('&workflows='+encodeURIComponent(JSON.stringify(wfList))):'';
-  const es=new EventSource(`${API}/api/chat/stream?q=${encodeURIComponent(msg)}&history=${encodeURIComponent(JSON.stringify(recentHistory.slice(0,-1)))}${wfParam}`);
+  var convParam=(_curConvId?('&conv_id='+_curConvId):'');
+  if(window._curES){try{window._curES.close()}catch(e){}}
+  const es=new EventSource(`${API}/api/chat/stream?q=${encodeURIComponent(msg)}&history=${encodeURIComponent(JSON.stringify(recentHistory.slice(0,-1)))}${wfParam}${convParam}`);
+  window._curES=es;
   let botEl=null;
   let lastBotText='';
 
@@ -917,6 +1123,7 @@ function send(){
 
     if(data.type==='start'){
       hideTyping();
+      if(data.conv_id){_curConvId=data.conv_id;localStorage.setItem('sai_conv_id',String(_curConvId))}
     }
 
     else if(data.type==='thinking_start'){
@@ -955,6 +1162,24 @@ function send(){
       addDivider(data.content);
     }
 
+    else if(data.type==='chain_suggestion'){
+      var sugBox=document.createElement('div');
+      sugBox.style.cssText='margin:6px 0;padding:8px 12px;border-radius:8px;border:1px solid rgba(124,58,237,.2);background:rgba(124,58,237,.06);font-size:11px;color:#c4b5fd';
+      sugBox.innerHTML='<span style="color:#7c3aed;font-weight:600">🔗 推荐下一步: </span>';
+      (data.suggestions||[]).forEach(function(s){
+        var btn=document.createElement('button');
+        btn.textContent=s.label||s;
+        btn.style.cssText='display:inline-block;margin:2px 4px;padding:3px 10px;border-radius:12px;border:1px solid rgba(124,58,237,.3);background:rgba(124,58,237,.1);color:#c4b5fd;cursor:pointer;font-size:11px;transition:all .2s';
+        btn.onmouseover=function(){this.style.background='rgba(124,58,237,.25)';this.style.borderColor='rgba(124,58,237,.5)'};
+        btn.onmouseout=function(){this.style.background='rgba(124,58,237,.1)';this.style.borderColor='rgba(124,58,237,.3)'};
+        btn.onclick=function(){askText('执行'+s.label)};
+        sugBox.appendChild(btn);
+      });
+      var chatBox=document.getElementById('chat-messages');
+      chatBox.appendChild(sugBox);
+      chatBox.scrollTop=chatBox.scrollHeight;
+    }
+
     else if(data.type==='tool_start'){
       addToolStatus(data.server, data.tool, 'running');
       var k=data.server.replace(/[^a-z]/gi,'').toLowerCase();if(svcCallCounts[k]!==undefined)svcCallCounts[k]++;
@@ -968,6 +1193,17 @@ function send(){
       handleUIAction(data.action, data.args);
     }
 
+    else if(data.type==='geojson_data'){
+      var gj=data.geojson;
+      if(gj){
+        try{
+          var l=L.geoJSON(gj,{style:{color:"#00d4ff",fillColor:"#00d4ff",fillOpacity:.25,weight:2}}).addTo(map);
+          addMapLayer(l, data.tool||'geojson');
+          try{map.fitBounds(l.getBounds().pad(.2))}catch(e){}
+        }catch(e){}
+      }
+    }
+
     else if(data.type==='tool_result'){
       addToolStatus(data.server, data.tool, 'ok', data.elapsed_ms);
       addEvent(data.server, data.tool, `${data.elapsed_ms}ms`);
@@ -977,6 +1213,7 @@ function send(){
       if(runningNode){runningNode.status='done';renderWfNode(runningNode);renderWfEdges()}
 
       renderToolResult(data.tool, data.server, data.result);
+      saveToolCtx(data.tool, data.result);
 
     }
 
@@ -1037,6 +1274,7 @@ function send(){
       }
       if(lastBotText){
         chatHistory.push({role:'assistant',content:lastBotText});
+        saveChatHistory();
       }
     }
   };
@@ -1138,16 +1376,17 @@ function renderGenericResult(tool, server, result){
       });
     }else{
       var pd='';vals.forEach(function(v,i){var x=i/(vals.length-1)*370+35;var y=135-((v-minV)/range)*110;pd+=(i===0?'M':'L')+x+' '+y;});
-      // area fill
       var fd=pd+' L '+(35+370)+' 135 L 35 135 Z';
-      svg+='<path d="'+fd+'" fill="url(#aGrad)" opacity=".15"/><defs><linearGradient id="aGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#00d4ff"/><stop offset="100%" stop-color="#0a0e1a"/></linearGradient></defs>';
-      svg+='<path d="'+pd+'" fill="none" stroke="#00d4ff" stroke-width="2"/>';
-      // dots
-      vals.forEach(function(v,i){if(i%Math.max(1,Math.floor(vals.length/20))===0){var x=i/(vals.length-1)*370+35;var y=135-((v-minV)/range)*110;svg+='<circle cx="'+x+'" cy="'+y+'" r="3" fill="#00d4ff"/>';}});
+      var pathId='ts_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+      svg+='<path id="'+pathId+'" d="'+fd+'" fill="url(#aGrad)" opacity=".15"/><defs><linearGradient id="aGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#00d4ff"/><stop offset="100%" stop-color="#0a0e1a"/></linearGradient></defs>';
+      svg+='<path id="'+pathId+'_line" d="'+pd+'" fill="none" stroke="#00d4ff" stroke-width="2" stroke-dasharray="1000" stroke-dashoffset="1000"><animate attributeName="stroke-dashoffset" from="1000" to="0" dur="'+Math.min(vals.length*0.08,3)+'s" fill="freeze" begin="0.3s"/></path>';
+      var playBtn='<button onclick="(function(btn){var line=document.getElementById(\''+pathId+'_line\');if(!line)return;line.setAttribute(\'stroke-dashoffset\',\'1000\');var anim=line.querySelector(\'animate\');if(anim){anim.beginElement()}else{line.style.transition=\'stroke-dashoffset 2s\';line.style.strokeDashoffset=\'0\'}})(this)" style="margin-left:6px;padding:2px 8px;border-radius:10px;border:1px solid rgba(0,212,255,.3);background:rgba(0,212,255,.08);color:#00d4ff;font-size:10px;cursor:pointer">▶ 重播</button>';
+      vals.forEach(function(v,i){if(i%Math.max(1,Math.floor(vals.length/20))===0){var x=i/(vals.length-1)*370+35;var y=135-((v-minV)/range)*110;svg+='<circle cx="'+x+'" cy="'+y+'" r="3" fill="#00d4ff" opacity="0"><animate attributeName="opacity" from="0" to="1" dur="0.2s" begin="'+(0.3+i/(vals.length-1)*Math.min(vals.length*0.08,3))+'s" fill="freeze"/></circle>';}});
     }
     var title=result.title||result.name||tool;
     svg+='<text x="35" y="14" fill="#667788" font-size="10">'+title+'</text><text x="405" y="152" fill="#445566" font-size="8" text-anchor="end">'+vals.length+'点</text></svg>';
     h+=svg;hasViz=true;
+    if(!isBar)h+=playBtn;
   }
   // 5. table / rows → HTML表格
   var tbl=result.table||result.rows||result.results;
@@ -1176,6 +1415,45 @@ function renderGenericResult(tool, server, result){
   if(result._generated_tool){
     h='<div style="color:#00ff88;font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px">🤖 自动生成: '+result._generated_tool+'</div>'+h;
   }
+  if(result.pipeline&&result.steps){
+    if(result.geojson){
+      try{var pL=L.geoJSON(result.geojson,{style:{color:'#ff4444',fillColor:'#ff4444',fillOpacity:.3,weight:1}}).addTo(map);addMapLayer(pL,'暴雨洪水全链路');try{map.fitBounds(pL.getBounds().pad(.1))}catch(e){}}catch(e){}
+    }
+    h+='<div style="margin:6px 0;padding:10px;border:1px solid rgba(255,136,0,.2);border-radius:8px;background:rgba(255,136,0,.04)">';
+    h+='<div style="color:#ff8800;font-weight:600;font-size:12px;margin-bottom:8px">🌊 暴雨洪水全链路 ('+result.total_steps+'步)</div>';
+    result.steps.forEach(function(s,i){
+      var ok=s.result_summary&&!s.result_summary.includes('error');
+      var icon=ok?'✅':'❌';
+      h+='<div style="display:flex;align-items:baseline;gap:6px;margin:4px 0;font-size:11px">';
+      h+='<span>'+icon+'</span><span style="color:#ff8800;font-weight:500;min-width:80px">'+s.step+'</span>';
+      h+='<span style="color:#94a3b8">'+(s.result_summary||'').slice(0,150).replace(/</g,'&lt;')+'</span>';
+      h+='</div>';
+    });
+    h+='</div>';
+    hasViz=true;
+  }
+  if(result.comparison&&result.scenarios){
+    h+='<div style="margin:6px 0;padding:10px;border:1px solid rgba(124,58,237,.2);border-radius:8px;background:rgba(124,58,237,.04)">';
+    h+='<div style="color:#a78bfa;font-weight:600;font-size:12px;margin-bottom:8px">📊 方案对比 ('+result.tool+')</div>';
+    h+='<div style="display:flex;gap:8px;flex-wrap:wrap">';
+    result.scenarios.forEach(function(sc){
+      var r=sc.result||{};
+      var err=r.error;
+      h+='<div style="flex:1;min-width:200px;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.2)">';
+      h+='<div style="color:#00d4ff;font-weight:600;font-size:11px;margin-bottom:4px">'+sc.label+'</div>';
+      if(err){h+='<div style="color:#ff4444;font-size:11px">'+err+'</div>'}
+      else{
+        var keys=Object.keys(r).filter(function(k){return k!=='_generated_tool'&&k!=='_generated_code'&&k!=='_generated_file'});
+        keys.slice(0,8).forEach(function(k){
+          var v=r[k];var vs=typeof v==='object'?JSON.stringify(v,null,0).slice(0,80):String(v).slice(0,80);
+          h+='<div style="font-size:10px;color:#94a3b8;margin:2px 0"><span style="color:#667788">'+k+':</span> '+vs.replace(/</g,'&lt;')+'</div>';
+        });
+      }
+      h+='</div>';
+    });
+    h+='</div></div>';
+    hasViz=true;
+  }
   if(result._generated_code){
     var codeStr=String(result._generated_code).replace(/</g,'&lt;');
     if(codeStr.length>2000) codeStr=codeStr.slice(0,2000)+'\n...';
@@ -1192,6 +1470,8 @@ function renderGenericResult(tool, server, result){
 }
 
 function renderToolResult(tool, server, result){
+  _lastExportData={tool:tool,server:server,result:result,ts:Date.now()};
+  if(result&&!result.error)_allExportData.push({tool:tool,server:server,result:JSON.parse(JSON.stringify(result)),ts:Date.now()});
   const richEl=addMsg('bot','');
   if(result&&result.error){richEl.innerHTML='<span style="color:#ff4444">❌ '+result.error+'</span>';return richEl}
   if(tool==='buffer'&&result&&result.geometry){

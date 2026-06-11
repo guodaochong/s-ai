@@ -25,7 +25,7 @@ print("Waiting 15s for services to start...")
 time.sleep(15)
 
 import socket
-ports = [5001,5002,5003,5004,5005,5006,5007,3000]
+ports = [5011,5002,5003,5004,5015,5006,5007,3000]
 for p in ports:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(1)

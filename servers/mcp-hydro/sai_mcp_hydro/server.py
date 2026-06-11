@@ -394,7 +394,7 @@ app.router.add_api_route("/messages/", sse.handle_post_message, methods=["POST"]
 
 
 def main():
-    uvicorn.run(app, host="0.0.0.0", port=5005)
+    uvicorn.run(app, host="0.0.0.0", port=5015)
 
 
 if __name__ == "__main__":
