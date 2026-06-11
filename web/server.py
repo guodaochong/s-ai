@@ -706,25 +706,41 @@ GEN_TOOL_DIR = DATA_DIR / "generated_tools"
 GEN_TOOL_DIR.mkdir(parents=True, exist_ok=True)
 
 
-async def _generate_tool(query: str) -> dict | None:
+async def _generate_tool(query: str, fix_context: dict | None = None) -> dict | None:
+    system_msg = """You are a code generator for a water resources spatial intelligence platform.
+STRICT RULES:
+1. Function signature MUST be: def compute_xxx(**kwargs)
+2. Read params via kwargs.get('param_name', default_value), NEVER hardcode
+3. Must fully implement the algorithm, NO "simplified"/"TODO"/"approximate"
+4. GeoJSON polygons: coordinates must be [[lon,lat],[lon,lat]...], closed ring, NO NaN/Inf
+5. For Voronoi: MUST filter out regions containing -1, MUST clip vertices to valid range
+6. Output ONLY code, NO imports needed (math,json,np,scipy already available), NO explanation
+7. NEVER use emoji or non-ASCII characters
+
+Return a dict with result fields:
+- GeoJSON: {"geojson": {"type":"FeatureCollection","features":[...]}}
+- Curve: {"data_points": [{"x":..., "y":..., "label":...}]}
+- Bar chart: {"data_points": [...], "chart_type": "bar"}
+- Points: {"points": [{"lat":..., "lng":..., "label":...}]}
+- Table: {"table": [{"col1": val, ...}]}
+
+Available: math, json, numpy(as np), scipy.spatial.Voronoi"""
+
+    if fix_context:
+        user_msg = (
+            f"The following code has a bug, fix it.\n\n"
+            f"REQUIREMENT: {query}\n\n"
+            f"ORIGINAL CODE:\n```python\n{fix_context.get('code', '')}\n```\n\n"
+            f"ERROR:\n{fix_context.get('error', '')}\n\n"
+            f"TRACEBACK:\n{fix_context.get('traceback', '')}\n\n"
+            f"Output the COMPLETE fixed function. Do NOT simplify or skip any logic."
+        )
+    else:
+        user_msg = f"REQUIREMENT: {query}\n\nGenerate a compute_xxx function with **kwargs signature. Fully implement the algorithm with visualization fields. No simplification!"
+
     messages = [
-        {"role": "system", "content": """为水利空间智能平台生成一个Python函数。
-严格规则：
-1. 函数签名必须是 def compute_xxx(**kwargs): 参数必须用**kwargs
-2. 函数内用 kwargs.get('参数名', 默认值) 读取参数，不要写死
-3. 必须完整实现算法，禁止"简化版""TODO""近似"
-4. geojson必须是Polygon/LineString，多边形坐标闭合
-5. 只输出代码，不要import，不要解释
-
-返回dict含计算结果，适合可视化时加对应字段：
-- GeoJSON: "geojson": {"type":"FeatureCollection","features":[...]}
-- 曲线: "data_points": [{"x":..., "y":..., "label":...}]
-- 柱状图: "data_points" + "chart_type":"bar"
-- 坐标: "points": [{"lat":..., "lng":..., "label":...}]
-- 表格: "table": [{"col1": val, ...}]
-
-可用: math, json, numpy(np), scipy.spatial.Voronoi。"""},
-        {"role": "user", "content": f"需求: {query}\n\n生成compute_开头的函数，签名用**kwargs，参数用kwargs.get读取加默认值。完整实现算法，加上可视化字段。禁止简化！"}
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": user_msg}
     ]
     try:
         code, _, _ = await asyncio.wait_for(_call_llm(messages, model=MODEL_AIR, use_tools=False), timeout=25.0)
@@ -734,6 +750,13 @@ async def _generate_tool(query: str) -> dict | None:
         fn_match = re.search(r'def\s+(\w+)\s*\(', code)
         if not fn_match:
             return None
+        fn_name = fn_match.group(1)
+        tool_file = GEN_TOOL_DIR / f"{fn_name}.py"
+        tool_file.write_text(code, encoding="utf-8")
+        TOOL_TO_SERVER[fn_name] = "generated"
+        return {"tool_name": fn_name, "code": code[:500], "file": str(tool_file)}
+    except Exception:
+        return None
         fn_name = fn_match.group(1)
         tool_file = GEN_TOOL_DIR / f"{fn_name}.py"
         tool_file.write_text(code, encoding="utf-8")
@@ -801,45 +824,54 @@ def _check_result_quality(result: dict, query: str) -> list[str]:
     return issues
 
 
-async def _generate_tool_with_retry(query: str, max_attempts: int = 3) -> tuple[dict | None, dict | None, list[str]]:
-    """生成工具+执行+质检+自修复循环。返回 (gen_info, result, all_logs)"""
+async def _generate_tool_with_retry(query: str, max_attempts: int = 5) -> tuple[dict | None, dict | None, list[str]]:
     logs = []
-    last_error = ""
+    fix_context = None
     for attempt in range(1, max_attempts + 1):
-        logs.append(f"[尝试 {attempt}/{max_attempts}]")
-        aug_query = query
-        if attempt > 1 and last_error:
-            aug_query = (
-                f"{query}\n\n"
-                f"【上次失败原因: {last_error}】\n"
-                f"你必须修复以上问题，完整实现算法，不要简化！"
-            )
-        gen = await _generate_tool(aug_query)
+        logs.append(f"[attempt {attempt}/{max_attempts}]")
+        gen = await _generate_tool(query, fix_context=fix_context)
         if not gen:
-            logs.append("代码生成失败")
-            last_error = "LLM未返回有效代码"
+            logs.append("LLM returned no code")
+            fix_context = {"error": "LLM did not return valid code", "code": "", "traceback": ""}
             continue
 
-        code = gen.get("code", "")
-        code_issues = _check_code_quality(code, query)
+        full_code = ""
+        tool_file = GEN_TOOL_DIR / f"{gen['tool_name']}.py"
+        if tool_file.exists():
+            full_code = tool_file.read_text(encoding="utf-8")
+
+        code_issues = _check_code_quality(full_code, query)
         if code_issues:
-            logs.append(f"代码质检不通过: {'; '.join(code_issues)}")
-            last_error = "; ".join(code_issues)
+            logs.append(f"code quality fail: {'; '.join(code_issues)}")
+            fix_context = {"error": "; ".join(code_issues), "code": full_code, "traceback": ""}
             _delete_generated(gen["tool_name"])
             continue
 
         result = _exec_generated(gen["tool_name"], {})
-        result_issues = _check_result_quality(result, query)
-        if result_issues:
-            logs.append(f"结果质检不通过: {'; '.join(result_issues)}")
-            last_error = "; ".join(result_issues)
+
+        if isinstance(result, dict) and "error" in result:
+            err_msg = result["error"]
+            tb = result.get("traceback", "")
+            logs.append(f"exec error: {err_msg[:120]}")
+            fix_context = {"error": err_msg, "code": full_code, "traceback": tb}
             _delete_generated(gen["tool_name"])
             continue
 
-        logs.append(f"✅ 第{attempt}次尝试成功")
+        cleaned = _sanitize_geojson_result(result)
+        if cleaned is not None:
+            result = cleaned
+
+        result_issues = _check_result_quality(result, query)
+        if result_issues:
+            logs.append(f"result quality fail: {'; '.join(result_issues)}")
+            fix_context = {"error": "; ".join(result_issues), "code": full_code, "traceback": ""}
+            _delete_generated(gen["tool_name"])
+            continue
+
+        logs.append(f"success on attempt {attempt}")
         return gen, result, logs
 
-    logs.append(f"❌ {max_attempts}次尝试均失败")
+    logs.append(f"all {max_attempts} attempts failed")
     return None, None, logs
 
 
@@ -848,6 +880,108 @@ def _delete_generated(tool_name: str):
     if f.exists():
         f.unlink()
     TOOL_TO_SERVER.pop(tool_name, None)
+
+
+def _sanitize_geojson_result(result: dict) -> dict | None:
+    if not isinstance(result, dict) or "geojson" not in result:
+        return None
+    gj = result["geojson"]
+    if not isinstance(gj, dict) or "features" not in gj:
+        return None
+    cleaned_features = []
+    for f in gj["features"]:
+        if not isinstance(f, dict) or "geometry" not in f:
+            cleaned_features.append(f)
+            continue
+        geom = f["geometry"]
+        gtype = geom.get("type", "")
+        coords = geom.get("coordinates")
+        if gtype in ("Polygon", "MultiPolygon") and coords:
+            try:
+                fixed = _fix_polygon_coords(coords)
+                if fixed:
+                    geom["coordinates"] = fixed
+                    cleaned_features.append(f)
+            except Exception:
+                pass
+        elif gtype in ("LineString", "MultiLineString") and coords:
+            try:
+                fixed = _fix_line_coords(coords)
+                if fixed:
+                    geom["coordinates"] = fixed
+                    cleaned_features.append(f)
+            except Exception:
+                pass
+        else:
+            cleaned_features.append(f)
+    gj["features"] = cleaned_features
+    result["geojson"] = gj
+    return result
+
+
+def _fix_polygon_coords(rings):
+    if not rings:
+        return None
+    fixed_rings = []
+    for ring in rings:
+        if not isinstance(ring, list):
+            return None
+        fixed_ring = []
+        for pt in ring:
+            if not isinstance(pt, (list, tuple)) or len(pt) < 2:
+                return None
+            try:
+                lon = float(pt[0])
+                lat = float(pt[1])
+            except (TypeError, ValueError):
+                return None
+            if not (math.isfinite(lon) and math.isfinite(lat)):
+                return None
+            if abs(lon) > 180 or abs(lat) > 90:
+                return None
+            fixed_ring.append([lon, lat])
+        if len(fixed_ring) < 3:
+            return None
+        if fixed_ring[0] != fixed_ring[-1]:
+            fixed_ring.append(fixed_ring[0])
+        fixed_rings.append(fixed_ring)
+    return fixed_rings if fixed_rings else None
+
+
+def _fix_line_coords(lines):
+    if not lines:
+        return None
+    if isinstance(lines[0], (int, float)):
+        pts = lines
+        fixed = []
+        for pt in pts:
+            try:
+                v = float(pt)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(v):
+                return None
+            fixed.append([v])
+        return fixed
+    fixed_lines = []
+    for line in lines:
+        if not isinstance(line, list):
+            return None
+        fixed = []
+        for pt in line:
+            if not isinstance(pt, (list, tuple)) or len(pt) < 2:
+                return None
+            try:
+                lon = float(pt[0])
+                lat = float(pt[1])
+            except (TypeError, ValueError):
+                return None
+            if not (math.isfinite(lon) and math.isfinite(lat)):
+                return None
+            fixed.append([lon, lat])
+        if len(fixed) >= 2:
+            fixed_lines.append(fixed)
+    return fixed_lines if fixed_lines else None
 
 
 def _exec_generated(tool_name: str, args: dict) -> dict:
@@ -884,7 +1018,9 @@ def _exec_generated(tool_name: str, args: dict) -> dict:
                 result = fn()
         return result if isinstance(result, dict) else {"result": str(result)}
     except Exception as e:
-        return {"error": f"Execution error: {str(e)[:200]}"}
+        import traceback as tb
+        full_trace = tb.format_exc()
+        return {"error": f"{type(e).__name__}: {str(e)}", "traceback": full_trace, "failed_code": code}
 
 
 # ── 11. Neuro-Symbolic Physics Validator ──────────────────────────────
