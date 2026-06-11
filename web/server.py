@@ -984,6 +984,22 @@ def _fix_line_coords(lines):
     return fixed_lines if fixed_lines else None
 
 
+def _nativefy(obj):
+    if isinstance(obj, dict):
+        return {k: _nativefy(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_nativefy(i) for i in obj]
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return _nativefy(obj.tolist())
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return 0.0
+    return obj
+
+
 def _exec_generated(tool_name: str, args: dict) -> dict:
     tool_file = GEN_TOOL_DIR / f"{tool_name}.py"
     if not tool_file.exists():
@@ -1016,7 +1032,8 @@ def _exec_generated(tool_name: str, args: dict) -> dict:
                 result = fn(args)
             except TypeError:
                 result = fn()
-        return result if isinstance(result, dict) else {"result": str(result)}
+        raw = result if isinstance(result, dict) else {"result": str(result)}
+        return _nativefy(raw)
     except Exception as e:
         import traceback as tb
         full_trace = tb.format_exc()
