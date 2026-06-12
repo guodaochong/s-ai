@@ -25,9 +25,9 @@ GLM_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 GLM_CODE_URL = "https://open.bigmodel.cn/api/pying/paas/v4/chat/completions"
 
 # ── Models ──
-MODEL_FLASH = "GLM-5.1"
-MODEL_AIR = "GLM-5.1"
-MODEL_CODE = "GLM-4-Flash"
+MODEL_FLASH = "glm-4-flash-250414"
+MODEL_AIR = "glm-4-air-250414"
+MODEL_CODE = "glm-4-flash-250414"
 
 # ── Cache & Circuit Breaker ──
 CACHE_MAX = 200
