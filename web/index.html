@@ -1592,7 +1592,7 @@ var SVC_META={
   flood:{name:'Flood',label:'洪水分析师',color:'#ff4444'},
   raster:{name:'Raster',label:'地形分析专家',color:'#44ff44'}
 };
-var SVC_PORTS={router:3000,gis:5001,data:5002,knowledge:5003,map:5004,hydro:5005,flood:5006,raster:5007};
+var SVC_PORTS={router:3000,gis:5011,data:5002,knowledge:5003,map:5004,hydro:5015,flood:5006,raster:5007};
 
 var WF_TOOLS={
   gis:{label:'GIS 空间分析',color:'#00ff88',tools:[
@@ -2042,7 +2042,7 @@ function refreshDash(){
   html+='<div style="text-align:center"><div style="font-size:18px;font-weight:700;color:var(--warn)">'+Math.round(_sessionMs/1000)+'s</div><div style="font-size:9px;color:var(--text-dim)">会话时长</div></div>';
   html+='</div></div>';
   var svcs=['router','gis','data','knowledge','map','hydro','flood','raster'];
-  var ports=[3000,5001,5002,5003,5004,5005,5006,5007];
+  var ports=[3000,5011,5002,5003,5004,5015,5006,5007];
   for(var i=0;i<svcs.length;i++){
     var s=svcs[i];var m=SVC_META[s];var calls=svcCallCounts[s]||0;var bar=Math.min(calls*10,100);
     html+='<div class="dash-svc"><div class="ds-head"><span class="ds-name">'+m.label+'</span><span class="ds-dot" id="dot-'+s+'"></span></div>';
@@ -2053,7 +2053,7 @@ function refreshDash(){
 }
 setInterval(function(){
   ['gis','data','knowledge','map','hydro','flood','raster'].forEach(function(s,i){
-    var ports=[5001,5002,5003,5004,5005,5006,5007];
+    var ports=[5011,5002,5003,5004,5015,5006,5007];
     fetch('http://127.0.0.1:'+ports[i]+'/health',{signal:AbortSignal.timeout(2000)}).then(function(r){return r.json()}).then(function(){
       var dot=document.getElementById('dot-'+s);if(dot)dot.classList.remove('offline');
     }).catch(function(){var dot=document.getElementById('dot-'+s);if(dot)dot.classList.add('offline')});
