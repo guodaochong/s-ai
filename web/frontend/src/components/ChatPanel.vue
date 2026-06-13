@@ -8,12 +8,57 @@ const { send } = useSSE()
 const inputText = ref('')
 const messagesEl = ref<HTMLDivElement>()
 const showExportMenu = ref(false)
+const pendingImage = ref<{ url: string; filename: string } | null>(null)
+const lightboxUrl = ref<string | null>(null)
+const imgUploading = ref(false)
 
 function handleSend() {
-  if (!inputText.value.trim() || chatStore.isStreaming) return
-  send(inputText.value.trim())
+  if ((!inputText.value.trim() && !pendingImage.value) || chatStore.isStreaming) return
+  let msg = inputText.value.trim()
+  if (pendingImage.value) {
+    msg = `[img:${pendingImage.value.filename}] ${msg}`.trim()
+    pendingImage.value = null
+  }
+  send(msg)
   inputText.value = ''
   nextTick(scrollToBottom)
+}
+
+async function handleImageSelect(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (!input.files?.length) return
+  const file = input.files[0]
+  input.value = ''
+  if (!file.type.startsWith('image/')) {
+    chatStore.addBotMessage('⚠️ 请选择图片文件')
+    return
+  }
+  imgUploading.value = true
+  const previewUrl = URL.createObjectURL(file)
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    const resp = await fetch('/api/upload_image', { method: 'POST', body: fd })
+    const data = await resp.json()
+    if (data.error) {
+      chatStore.addBotMessage(`⚠️ 上传失败: ${data.error}`)
+      URL.revokeObjectURL(previewUrl)
+    } else {
+      pendingImage.value = { url: previewUrl, filename: data.filename }
+    }
+  } catch {
+    chatStore.addBotMessage('⚠️ 图片上传失败，请确保后端已启动')
+    URL.revokeObjectURL(previewUrl)
+  } finally {
+    imgUploading.value = false
+  }
+}
+
+function removePendingImage() {
+  if (pendingImage.value) {
+    URL.revokeObjectURL(pendingImage.value.url)
+    pendingImage.value = null
+  }
 }
 
 function scrollToBottom() {
@@ -244,10 +289,28 @@ function closeExportMenu(e: MouseEvent) {
       <span class="suggestion auto-pipeline" @click="autoPipeline">auto-pipeline</span>
     </div>
 
+    <div v-if="pendingImage || imgUploading" class="img-preview-bar">
+      <div v-if="imgUploading" class="img-uploading">
+        <span class="img-spin"></span> 上传中...
+      </div>
+      <template v-else-if="pendingImage">
+        <div class="img-thumb-wrap" @click="lightboxUrl = pendingImage!.url">
+          <img :src="pendingImage!.url" class="img-thumb" />
+          <div class="img-thumb-overlay">🔍 点击放大</div>
+        </div>
+        <span class="img-name">{{ pendingImage!.filename }}</span>
+        <button class="img-remove" @click="removePendingImage">✕</button>
+      </template>
+    </div>
+
     <div class="chat-input">
       <label class="input-btn" title="上传GIS数据">
         📎
         <input type="file" accept=".geojson,.json,.shp,.zip,.gpkg,.kml,.csv" style="display:none" @change="uploadFile" />
+      </label>
+      <label class="input-btn" :class="{ active: !!pendingImage }" title="上传图片">
+        {{ imgUploading ? '⏳' : '📷' }}
+        <input type="file" accept="image/*" style="display:none" @change="handleImageSelect" :disabled="imgUploading" />
       </label>
       <input
         v-model="inputText"
@@ -266,6 +329,13 @@ function closeExportMenu(e: MouseEvent) {
         </div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <div v-if="lightboxUrl" class="lightbox" @click="lightboxUrl = null">
+        <img :src="lightboxUrl" class="lightbox-img" />
+        <button class="lightbox-close" @click.stop="lightboxUrl = null">✕</button>
+      </div>
+    </Teleport>
   </aside>
 </template>
 
@@ -594,6 +664,27 @@ function closeExportMenu(e: MouseEvent) {
 .tool-render :deep(.tr-details summary) {
   cursor: pointer; font-size: 11px; color: #667; padding: 4px 0;
 }
+.tool-render :deep(.tr-recon-card) {
+  padding: 12px; border-radius: var(--radius-sm);
+  background: rgba(0, 212, 255, .06); border: 1px solid rgba(0, 212, 255, .2);
+}
+.tool-render :deep(.tr-recon-header) { font-size: 13px; font-weight: 600; color: #00d4ff; margin-bottom: 8px; }
+.tool-render :deep(.tr-recon-stats) { display: flex; gap: 12px; margin-bottom: 8px; }
+.tool-render :deep(.tr-recon-stat) { text-align: center; }
+.tool-render :deep(.tr-recon-num) { display: block; font-size: 16px; font-weight: 700; color: #e2e8f0; }
+.tool-render :deep(.tr-recon-lbl) { font-size: 10px; color: #64748b; }
+.tool-render :deep(.tr-recon-actions) { display: flex; gap: 6px; }
+.tool-render :deep(.tr-recon-btn) {
+  font-size: 11px; padding: 5px 12px; border-radius: 6px;
+  border: 1px solid var(--border-solid); background: var(--bg-card);
+  color: var(--text); cursor: pointer; text-decoration: none;
+  display: inline-flex; align-items: center; transition: all .15s;
+}
+.tool-render :deep(.tr-recon-btn:hover) { border-color: var(--accent); color: var(--accent); }
+.tool-render :deep(.tr-recon-btn.primary) {
+  border-color: rgba(0, 212, 255, .4); color: #00d4ff;
+  background: rgba(0, 212, 255, .08);
+}
 .tool-render :deep(.tr-code) {
   font-size: 10px; color: #8899aa; background: #080c14;
   padding: 8px; border-radius: 4px; white-space: pre-wrap;
@@ -721,5 +812,141 @@ function closeExportMenu(e: MouseEvent) {
 }
 .export-menu button:hover {
   background: rgba(0, 212, 255, .1);
+}
+
+.img-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-top: 1px solid rgba(0, 212, 255, .1);
+  background: rgba(0, 212, 255, .03);
+  flex-shrink: 0;
+}
+.img-uploading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.img-spin {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(0, 212, 255, .2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+}
+.img-thumb-wrap {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 2px solid rgba(0, 212, 255, .3);
+  flex-shrink: 0;
+  transition: border-color .2s;
+}
+.img-thumb-wrap:hover {
+  border-color: var(--accent);
+}
+.img-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.img-thumb-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, .6);
+  color: #fff;
+  font-size: 10px;
+  opacity: 0;
+  transition: opacity .2s;
+}
+.img-thumb-wrap:hover .img-thumb-overlay {
+  opacity: 1;
+}
+.img-name {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.img-remove {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid rgba(239, 68, 68, .3);
+  background: rgba(239, 68, 68, .1);
+  color: #ff6b6b;
+  cursor: pointer;
+  font-size: 12px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  transition: all .15s;
+}
+.img-remove:hover {
+  background: rgba(239, 68, 68, .25);
+  border-color: rgba(239, 68, 68, .5);
+}
+.input-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(0, 212, 255, .08);
+}
+</style>
+
+<style>
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(0, 0, 0, .88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  animation: fadeIn .2s ease;
+  padding: 40px;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.lightbox-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, .6);
+}
+.lightbox-close {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, .2);
+  background: rgba(255, 255, 255, .08);
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: all .15s;
+}
+.lightbox-close:hover {
+  background: rgba(255, 255, 255, .2);
+  border-color: rgba(255, 255, 255, .4);
 }
 </style>
