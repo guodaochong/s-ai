@@ -129,6 +129,11 @@ DEM数据位于甘肃迭部县(104.89°E, 33.19°N)，0.5m分辨率，3GB GeoTIF
 - 用户问天气/降雨预报 → 调 weather_forecast
 - 用户问卫星/遥感影像 → 调 satellite_search
 
+【3D重建规则】
+- 用户上传图片后要求"3D重建/三维建模/立体模型/reconstruct"时 → 调 reconstruct_3d
+- image_path 从对话上下文中的[上传图片路径:xxx]获取
+- 没有[上传图片路径:xxx]时，提示用户先上传图片
+
 【关键规则 - auto_tool 兜底】
 以下场景必须调 auto_tool，绝对不能输出Python代码文本：
 - 计算/公式/求解/拟合/统计/矩阵/表格/曲线/图表
@@ -162,7 +167,9 @@ def _detect_ui_action(msg: str) -> str:
     if any(k in msg for k in ["四叉树", "Quadtree", "嵌套剖分", "自适应剖分"]):
         return "open_quadtree"
     if any(k in msg for k in ["三维", "3D", "立体", "heightmap", "立体场景", "三维场景", "立体地形", "三维地形"]):
-        return "open_3d"
+        # 如果用户意图是3D重建，不走UI意图，交给reconstruct_3d工具
+        if not any(k in msg for k in ["重建", "reconstruct", "建模", "生成模型", "建模型", "3D模型", "三维模型", "立体模型"]):
+            return "open_3d"
     return ""
 
 
@@ -278,7 +285,7 @@ _route_cache: dict[str, str] = {}
 _ROUTE_CACHE_MAX = 200
 
 
-_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool".split(",")
+_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool,reconstruct_3d".split(",")
 
 _ROUTE_SYSTEM = """你是路由模块。只回复工具名或SIMPLE。
 
@@ -1202,18 +1209,21 @@ GLM_TOOLS.extend([
     {"type": "function", "function": {"name": "spatial_knowledge_query", "description": "查询空间知识图谱(实体和关系)", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "查询关键词"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "scatter_interpolate", "description": "散点插值/克里金插值：将离散数据点插值为连续网格表面。支持克里金(Kriging)、IDW反距离加权、RBF径向基函数、linear/nearest/cubic方法。输入散点坐标和值，输出插值网格统计数据。", "parameters": {"type": "object", "properties": {"points_json": {"type": "string", "description": "散点JSON数组: [{\"x\":104.9,\"y\":33.15,\"z\":1200}, ...]"}, "method": {"type": "string", "description": "插值方法: kriging(克里金), idw(反距离), rbf(径向基), linear, nearest, cubic", "default": "linear"}, "grid_resolution": {"type": "integer", "description": "网格分辨率(NxN)", "default": 100}}, "required": []}}},
     {"type": "function", "function": {"name": "auto_tool", "description": "【最终兜底工具】自动生成并执行Python代码完成计算任务。当你发现现有工具无法满足用户需求时，必须调用此工具。适用场景：数学计算、公式推导、水力计算、水文分析、拟合统计、生成GeoJSON、绘制图表、表格计算、矩阵运算。不要输出代码文本，调用此工具即可自动执行。", "parameters": {"type": "object", "properties": {"requirement": {"type": "string", "description": "用户的完整需求描述，包含所有输入参数和期望输出格式"}, "params_json": {"type": "string", "description": "输入参数JSON，如{\"b\":2,\"h\":1.5,\"n\":0.015}"}}, "required": ["requirement"]}}},
+    {"type": "function", "function": {"name": "reconstruct_3d", "description": "AI三维重建：从单张照片生成3D模型(GLB格式)。基于TripoSR大模型，单张照片秒出3D网格。适用场景：水工建筑物三维重建、堤防外观重建、桥梁结构建模、设备3D数字化。当用户上传图片并要求3D重建/三维建模时调用此工具。", "parameters": {"type": "object", "properties": {"image_path": {"type": "string", "description": "上传图片的文件路径（从对话上下文中的[上传图片路径:xxx]获取）"}}, "required": ["image_path"]}}},
 ])
 
 TOOL_TO_SERVER["weather_forecast"] = "internal"
 TOOL_TO_SERVER["satellite_search"] = "internal"
 TOOL_TO_SERVER["spatial_knowledge_query"] = "internal"
 TOOL_TO_SERVER["auto_tool"] = "internal"
+TOOL_TO_SERVER["reconstruct_3d"] = "internal"
 
 ROUTING_RULES.extend([
     (r"天气|天气预报|降雨预报|气象", "weather_forecast"),
     (r"卫星|遥感|Sentinel|Landsat|影像", "satellite_search"),
     (r"知识图谱|相关实体|空间实体", "spatial_knowledge_query"),
     (r"散点插值|插值|griddata|IDW|克里金|Kriging|反距离|空间插值", "scatter_interpolate"),
+    (r"3D|三维|3d|重建|reconstruct|建模|立体", "reconstruct_3d"),
 ])
 
 
@@ -1271,6 +1281,65 @@ async def _handle_internal_tool(tool_name: str, args: dict, user_msg: str = "") 
         result["_generated_file"] = gen["file"]
         result = _normalize_auto_tool_result(result)
         return result
+    if tool_name == "reconstruct_3d":
+        import re as _re
+        import threading as _threading
+        from reconstruct.engine import create_task, get_task_status, _tasks
+        image_path = args.get("image_path", "")
+        if not image_path:
+            return {"error": "缺少 image_path 参数，无法执行3D重建"}
+        for pat in [r"\[上传图片路径:(.+?)\]", r"\[img:(.+?)\]"]:
+            m = _re.search(pat, image_path)
+            if m:
+                image_path = m.group(1)
+                break
+        p = Path(image_path)
+        if not p.exists() and not p.is_absolute():
+            for candidate in [UPLOAD_IMG_DIR / p.name, UPLOAD_IMG_DIR / image_path, DATA_DIR / "uploads_img" / p.name]:
+                if candidate.exists():
+                    p = candidate
+                    break
+        image_path = str(p)
+        if not p.exists():
+            return {"error": f"图片文件不存在: {image_path}"}
+        if not p.is_file():
+            return {"error": f"路径不是文件: {image_path}"}
+        eng = _get_recon_engine()
+        task_id = create_task()
+        done_evt = _threading.Event()
+        run_err = [None]
+
+        def _run_recon():
+            try:
+                eng.reconstruct_single(image_path, task_id)
+            except Exception as e:
+                run_err[0] = str(e)
+                if task_id in _tasks:
+                    _tasks[task_id]["error"] = str(e)
+                    _tasks[task_id]["stage"] = "error"
+            finally:
+                done_evt.set()
+
+        t = _threading.Thread(target=_run_recon, daemon=True)
+        t.start()
+        while not done_evt.is_set():
+            await asyncio.sleep(1.5)
+        status = get_task_status(task_id)
+        if run_err[0] or status.get("error"):
+            return {"error": run_err[0] or status.get("error", "unknown")}
+        meta = status.get("meta", {})
+        glb_url = f"/api/reconstruct/result/{task_id}"
+        return {
+            "recon_3d": True,
+            "glb_url": glb_url,
+            "task_id": task_id,
+            "vertices": meta.get("vertices", 0),
+            "faces": meta.get("faces", 0),
+            "inference_time": meta.get("inference_time", 0),
+            "total_time": meta.get("total_time", 0),
+            "vram_peak_gb": meta.get("vram_peak_gb", 0),
+            "message": f"3D重建完成: {meta.get('vertices', '?')}顶点, {meta.get('faces', '?')}面片, 耗时{meta.get('total_time', '?')}s",
+        }
     return {"error": f"Unknown internal tool: {tool_name}"}
 
 
@@ -1488,7 +1557,7 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
                 analysis = await _analyze_image(img_b64)
                 yield _sse({"type": "thinking", "agent": "vision", "content": analysis[:300]})
                 yield _sse({"type": "thinking_end", "agent": "vision"})
-                message = f"用户上传了图片({img_name})，AI分析结果: {analysis}\n\n用户问题: {message.replace(f'[img:{img_name}]', '').strip() or '请根据图片分析结果进行水利相关分析'}"
+                message = f"用户上传了图片({img_name})，AI分析结果: {analysis}\n[上传图片路径:{str(img_path)}]\n\n用户问题: {message.replace(f'[img:{img_name}]', '').strip() or '请根据图片分析结果进行水利相关分析'}"
 
         parsed_history = []
         if history:
@@ -1934,6 +2003,94 @@ async def get_evolution_stats():
 @app.get("/api/evolution/suggestions")
 async def get_evolution_suggestions():
     return {"suggestions": _evolution_suggestions()}
+
+
+# ─── 3D Reconstruction (TripoSR) ────────────────────────────────────────────
+RECON_DIR = Path(__file__).parent / "reconstruct"
+RECON_OUTPUTS = RECON_DIR / "outputs"
+RECON_OUTPUTS.mkdir(parents=True, exist_ok=True)
+
+_recon_engine = None
+_recon_tasks: dict = {}
+
+def _get_recon_engine():
+    global _recon_engine
+    if _recon_engine is None:
+        import sys as _sys
+        _recon_path = str(RECON_DIR)
+        if _recon_path not in _sys.path:
+            _sys.path.insert(0, _recon_path)
+        from reconstruct.engine import ReconstructionEngine
+        _recon_engine = ReconstructionEngine.get_instance()
+    return _recon_engine
+
+
+@app.post("/api/reconstruct/upload")
+async def reconstruct_upload(file: UploadFile = FastAPIFile(...)):
+    import uuid as _uuid, threading as _threading
+    from reconstruct.engine import create_task, get_task_status, _tasks
+
+    ext = Path(file.filename or "img.png").suffix.lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff"):
+        return {"error": f"Unsupported format: {ext}"}
+
+    task_id = create_task()
+    task_dir = RECON_OUTPUTS / task_id
+    task_dir.mkdir(parents=True, exist_ok=True)
+
+    img_path = task_dir / f"input{ext}"
+    content = await file.read()
+    img_path.write_bytes(content)
+
+    def _run():
+        try:
+            eng = _get_recon_engine()
+            eng.reconstruct_single(str(img_path), task_id)
+        except Exception as e:
+            if task_id in _tasks:
+                _tasks[task_id]["error"] = str(e)
+                _tasks[task_id]["stage"] = "error"
+
+    t = _threading.Thread(target=_run, daemon=True)
+    t.start()
+
+    return {"task_id": task_id}
+
+
+@app.get("/api/reconstruct/status/{task_id}")
+async def reconstruct_status(task_id: str):
+    from reconstruct.engine import get_task_status
+    status = get_task_status(task_id)
+    return status
+
+
+@app.get("/api/reconstruct/result/{task_id}")
+async def reconstruct_result(task_id: str):
+    from reconstruct.engine import get_task_status
+    status = get_task_status(task_id)
+    glb = status.get("output")
+    if glb and Path(glb).exists():
+        from starlette.responses import FileResponse
+        return FileResponse(glb, media_type="model/gltf-binary",
+                           filename=f"reconstruction_{task_id}.glb")
+    return {"error": "Result not ready"}
+
+
+@app.get("/api/reconstruct/preview/{task_id}")
+async def reconstruct_preview(task_id: str):
+    from reconstruct.engine import get_task_status
+    status = get_task_status(task_id)
+    meta = status.get("meta", {})
+    return {
+        "task_id": task_id,
+        "stage": status.get("stage"),
+        "progress": status.get("progress", 0),
+        "meta": meta,
+        "error": status.get("error"),
+    }
+
+
+# ─── End 3D Reconstruction ──────────────────────────────────────────────────
 
 
 if __name__ == "__main__":
