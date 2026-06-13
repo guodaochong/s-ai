@@ -2,12 +2,10 @@
 import { ref, onMounted } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useMapStore } from '@/stores/map'
-import { useServices } from '@/composables/useServices'
 
 const API = '/api'
 const chatStore = useChatStore()
 const mapStore = useMapStore()
-const { services, serviceCount } = useServices()
 
 const agents = [
   { key: 'router', emoji: '💡', name: 'Router 总指挥', caps: '意图路由 · 任务分解 · 结果整合' },
@@ -111,23 +109,6 @@ onMounted(() => {
       >
         <span class="conv-title" @click="switchConversation(c.id)">{{ c.title || '对话 ' + c.id }}</span>
         <span class="conv-del" @click.stop="deleteConversation(c.id)">✕</span>
-      </div>
-    </div>
-
-    <h3>系统信息</h3>
-    <div class="sys-info">
-      <div>MCP Servers: <span class="val-green">{{ serviceCount.healthy }}</span>/{{ serviceCount.total }}</div>
-      <div>Tools: <span class="val-cyan">{{ serviceCount.tools }}</span></div>
-      <div>Events: <span class="val-purple">{{ chatStore.eventCount }}</span></div>
-      <div>图层: <span class="val-cyan">{{ mapStore.layers.length }}</span></div>
-    </div>
-
-    <h3>服务状态</h3>
-    <div class="svc-list">
-      <div v-for="svc in services" :key="svc.name" class="svc-row">
-        <span class="svc-dot" :style="{ background: svc.healthy ? '#10b981' : '#ef4444' }" />
-        <span class="svc-name">{{ svc.name }}</span>
-        <span :class="['svc-st', svc.healthy ? 'ok' : 'err']">{{ svc.healthy ? '●' : '✕' }}</span>
       </div>
     </div>
   </aside>
@@ -280,32 +261,4 @@ h3::after {
 .val-green { color: var(--accent3); }
 .val-cyan { color: var(--accent); }
 .val-purple { color: var(--accent2); }
-.svc-list {
-  padding: 0 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.svc-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 6px;
-  font-size: 11px;
-}
-.svc-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.svc-name {
-  flex: 1;
-  color: var(--text-dim);
-  font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-}
-.svc-st { font-size: 10px; }
-.svc-st.ok { color: #10b981; }
-.svc-st.err { color: #ef4444; }
 </style>
