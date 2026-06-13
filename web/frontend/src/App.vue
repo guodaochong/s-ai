@@ -1,19 +1,32 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import TopBar from '@/components/TopBar.vue'
 import SideBar from '@/components/SideBar.vue'
 import MapPanel from '@/components/MapPanel.vue'
 import ChatPanel from '@/components/ChatPanel.vue'
 import WorkflowEditor from '@/components/WorkflowEditor.vue'
+import ReconstructionPanel from '@/components/ReconstructionPanel.vue'
 import { useChatStore } from '@/stores/chat'
 
 const chatStore = useChatStore()
 const eventsOpen = ref(false)
+const reconOpen = ref(false)
+
+const reconResultUrl = ref<string | null>(null)
+
+;(window as any).__openReconResult = (url: string) => {
+  reconResultUrl.value = url
+  reconOpen.value = true
+}
+
+onUnmounted(() => {
+  delete (window as any).__openReconResult
+})
 </script>
 
 <template>
   <div class="app-grid">
-    <TopBar />
+    <TopBar @openRecon="reconOpen = true" />
     <SideBar />
     <MapPanel />
     <ChatPanel />
@@ -31,12 +44,14 @@ const eventsOpen = ref(false)
       </div>
     </div>
   </div>
+
+  <ReconstructionPanel v-model:show="reconOpen" :initialGlbUrl="reconResultUrl" />
 </template>
 
 <style scoped>
 .app-grid {
   display: grid;
-  grid-template-columns: 260px 1fr 380px;
+  grid-template-columns: 260px 1fr 460px;
   grid-template-rows: 56px 1fr auto;
   height: 100vh;
   gap: 1px;

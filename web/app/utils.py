@@ -63,7 +63,8 @@ def parse_text_tool_calls(content: str) -> list[dict]:
 def detect_ui_action(msg: str) -> str:
     msg_lower = msg.lower().strip()
     if any(k in msg_lower for k in ["3d", "三维", "立体"]):
-        return "show_3d"
+        if not any(k in msg_lower for k in ["重建", "reconstruct", "建模", "模型"]):
+            return "show_3d"
     if any(k in msg_lower for k in ["卫星", "遥感", "sentinel", "landsat"]):
         return "show_satellite"
     if any(k in msg_lower for k in ["知识图谱", "关系图", "实体关系"]):

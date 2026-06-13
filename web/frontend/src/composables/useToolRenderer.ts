@@ -259,6 +259,30 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
     threeStore.loadHydroSimulation(r)
     return { html: `<span class="tr-accent">🌊 2D水动力模拟完成: ${r.frames?.length || 0}帧 | 峰值水深 ${r.peak_max_depth_m || '?'}m</span>`, mapActions: [] }
   },
+
+  reconstruct_3d(r, ms) {
+    if (!r.recon_3d) return { html: '', mapActions: [] }
+    const glbUrl = r.glb_url
+    const v = (r.vertices || 0).toLocaleString()
+    const f = (r.faces || 0).toLocaleString()
+    const t = r.total_time || '?'
+    const vram = r.vram_peak_gb || '?'
+    const html = `
+      <div class="tr-recon-card">
+        <div class="tr-recon-header">🧊 AI 三维重建完成</div>
+        <div class="tr-recon-stats">
+          <div class="tr-recon-stat"><span class="tr-recon-num">${v}</span><span class="tr-recon-lbl">顶点</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num">${f}</span><span class="tr-recon-lbl">面片</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num">${t}s</span><span class="tr-recon-lbl">耗时</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num">${vram}GB</span><span class="tr-recon-lbl">显存</span></div>
+        </div>
+        <div class="tr-recon-actions">
+          <a class="tr-recon-btn" href="${glbUrl}" download>⬇ 下载 GLB</a>
+          <button class="tr-recon-btn primary" onclick="window.__openReconResult('${glbUrl}')">👁️ 查看 3D</button>
+        </div>
+      </div>`
+    return { html, mapActions: [] }
+  },
 }
 
 /* ── Generic renderer (fallback) ── */
