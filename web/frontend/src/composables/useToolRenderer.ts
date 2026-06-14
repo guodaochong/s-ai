@@ -283,6 +283,222 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
       </div>`
     return { html, mapActions: [] }
   },
+
+  precipitation_grid(r, ms) {
+    if (!r.precipitation_grid) return { html: '', mapActions: [] }
+
+    const actions: (() => void)[] = []
+    const gridLats: number[] = r.grid_lats || []
+    const gridLons: number[] = r.grid_lons || []
+    const matrix: number[][] = r.precipitation_matrix || []
+    const timeSteps: string[] = r.time_steps || []
+    const stats = r.stats || {}
+    const bbox = r.bbox || []
+    const gs = r.grid_size || 8
+
+    function precipColor(mm: number): { fill: string; stroke: string } {
+      if (mm < 0.1) return { fill: 'rgba(30,40,60,0.1)', stroke: 'rgba(40,60,80,0.2)' }
+      if (mm < 10) return { fill: 'rgba(169,239,147,0.75)', stroke: 'rgba(169,239,147,0.9)' }
+      if (mm < 25) return { fill: 'rgba(63,184,60,0.85)', stroke: 'rgba(63,184,60,1)' }
+      if (mm < 50) return { fill: 'rgba(97,184,255,0.75)', stroke: 'rgba(97,184,255,0.9)' }
+      if (mm < 100) return { fill: 'rgba(0,1,247,0.65)', stroke: 'rgba(0,1,247,0.8)' }
+      if (mm < 150) return { fill: 'rgba(252,0,251,0.65)', stroke: 'rgba(252,0,251,0.8)' }
+      return { fill: 'rgba(255,0,0,1)', stroke: 'rgba(200,0,0,1)' }
+    }
+
+    function precipLabel(mm: number): string {
+      if (mm < 0.1) return ''
+      if (mm < 10) return '小雨'
+      if (mm < 25) return '中雨'
+      if (mm < 50) return '大雨'
+      if (mm < 100) return '暴雨'
+      if (mm < 150) return '大暴雨'
+      return '特大暴雨'
+    }
+
+    actions.push(() => {
+      const map = ms.getMap()
+      if (!map) return
+
+      const container = map.getContainer()
+      const panel = container.closest('.map-panel') || container.parentElement
+
+      ;(map as any)._precip_layers?.forEach((l: any) => map.removeLayer(l))
+      if ((map as any)._precip_timer) clearInterval((map as any)._precip_timer)
+      ;(panel as any)?.querySelector?.('#precip-timeline')?.remove?.()
+
+      const layers: any[] = []
+      let currentStep = 0
+      let playing = true
+      const totalSteps = matrix.length
+      const cellLat = gridLats.length > gs ? Math.abs(gridLats[gs] - gridLats[0]) : (bbox.length >= 4 ? (bbox[3] - bbox[1]) / gs : 0.05)
+      const cellLon = gridLons.length > 1 ? Math.abs(gridLons[1] - gridLons[0]) : (bbox.length >= 4 ? (bbox[2] - bbox[0]) / gs : 0.05)
+      const halfLat = cellLat / 2
+      const halfLon = cellLon / 2
+
+      function renderStep(step: number) {
+        layers.forEach(l => map.removeLayer(l))
+        layers.length = 0
+        const frame = matrix[step] || []
+        const zoom = map.getZoom()
+        const showValues = zoom >= 10
+
+        const layerGroup = L.layerGroup()
+        frame.forEach((val, idx) => {
+          if (idx >= gridLats.length) return
+          const lat = gridLats[idx]
+          const lon = gridLons[idx]
+          const colors = precipColor(val)
+          const bounds: L.LatLngBounds = L.latLngBounds(
+            [lat - halfLat, lon - halfLon],
+            [lat + halfLat, lon + halfLon],
+          )
+          const rect = L.rectangle(bounds, {
+            fillColor: colors.fill,
+            color: colors.stroke,
+            weight: 0.5,
+            fillOpacity: 1,
+          })
+          if (val >= 0.1) {
+            rect.bindTooltip(`${val.toFixed(1)}mm/h ${precipLabel(val)}`, {
+              sticky: true, className: 'precip-tip', direction: 'center',
+            })
+            if (showValues && val >= 1) {
+              rect.bindTooltip(`${val.toFixed(1)}`, {
+                permanent: true, className: 'precip-val', direction: 'center',
+              })
+            }
+          }
+          layerGroup.addLayer(rect)
+          layers.push(rect)
+        })
+        layerGroup.addTo(map)
+
+        const peakPt = stats.peak_center
+        if (peakPt) {
+          const m = L.circleMarker([peakPt.lat, peakPt.lon], {
+            radius: 8, fillColor: '#ff0000', color: '#fff', weight: 2, fillOpacity: 1,
+          })
+          m.bindPopup(`<b>暴雨中心</b><br>${(stats.peak_intensity_mm_hr || 0).toFixed(1)}mm/h<br>${precipLabel(stats.peak_intensity_mm_hr || 0)}<br>${stats.peak_time || ''}`)
+          m.addTo(map)
+          layers.push(m)
+        }
+
+        updateTimelineUI(step)
+      }
+
+      function updateTimelineUI(step: number) {
+        const playBtn = panel?.querySelector('#precip-play') as HTMLButtonElement
+        const timeLabel = panel?.querySelector('#precip-cur-time') as HTMLElement
+        const slider = panel?.querySelector('#precip-slider') as HTMLInputElement
+        const stepInfo = panel?.querySelector('#precip-step-info') as HTMLElement
+        if (timeLabel) {
+          const t = timeSteps[step] || ''
+          const d = t.slice(0, 10)
+          const h = t.slice(11, 16)
+          timeLabel.textContent = `${d} ${h}`
+        }
+        if (playBtn) playBtn.textContent = playing ? '⏸' : '▶'
+        if (slider) slider.value = String(step)
+        if (stepInfo) stepInfo.textContent = `${step + 1} / ${totalSteps}`
+      }
+
+      renderStep(0)
+
+      if (playing) {
+        (map as any)._precip_timer = setInterval(() => {
+          currentStep = (currentStep + 1) % totalSteps
+          renderStep(currentStep)
+        }, 700)
+      }
+
+      ;(map as any)._precip_layers = layers
+
+      const tl = document.createElement('div')
+      tl.id = 'precip-timeline'
+      tl.className = 'precip-timeline'
+      tl.innerHTML = `
+        <div class="ptl-bar">
+          <button id="ptl-prev" class="ptl-btn" title="上一帧">⏮</button>
+          <button id="precip-play" class="ptl-btn ptl-play" title="播放/暂停">⏸</button>
+          <button id="ptl-next" class="ptl-btn" title="下一帧">⏭</button>
+          <span id="precip-cur-time" class="ptl-time">--</span>
+          <input id="precip-slider" type="range" min="0" max="${totalSteps - 1}" value="0" class="ptl-slider" />
+          <span id="precip-step-info" class="ptl-step">1 / ${totalSteps}</span>
+        </div>
+        <div class="ptl-legend">
+          <span class="ptl-lg"><span class="ptl-swatch" style="background:rgba(169,239,147,0.75)"></span>0.1-10</span>
+          <span class="ptl-lg"><span class="ptl-swatch" style="background:rgba(63,184,60,0.85)"></span>10-25</span>
+          <span class="ptl-lg"><span class="ptl-swatch" style="background:rgba(97,184,255,0.75)"></span>25-50</span>
+          <span class="ptl-lg"><span class="ptl-swatch" style="background:rgba(0,1,247,0.65)"></span>50-100</span>
+          <span class="ptl-lg"><span class="ptl-swatch" style="background:rgba(252,0,251,0.65)"></span>100-150</span>
+          <span class="ptl-lg"><span class="ptl-swatch" style="background:rgba(255,0,0,1)"></span>>150</span>
+          <span class="ptl-lg-unit">mm/h</span>
+        </div>
+      `
+      panel?.appendChild(tl)
+
+      tl.querySelector('#precip-play')?.addEventListener('click', () => {
+        playing = !playing
+        if (playing) {
+          ;(map as any)._precip_timer = setInterval(() => {
+            currentStep = (currentStep + 1) % totalSteps
+            renderStep(currentStep)
+          }, 700)
+        } else {
+          if ((map as any)._precip_timer) clearInterval((map as any)._precip_timer)
+        }
+        updateTimelineUI(currentStep)
+      })
+      tl.querySelector('#ptl-prev')?.addEventListener('click', () => {
+        currentStep = (currentStep - 1 + totalSteps) % totalSteps
+        renderStep(currentStep)
+      })
+      tl.querySelector('#ptl-next')?.addEventListener('click', () => {
+        currentStep = (currentStep + 1) % totalSteps
+        renderStep(currentStep)
+      })
+      tl.querySelector('#precip-slider')?.addEventListener('input', (e) => {
+        currentStep = parseInt((e.target as HTMLInputElement).value)
+        renderStep(currentStep)
+      })
+
+      map.on('zoomend', () => renderStep(currentStep))
+
+      if (bbox.length >= 4) {
+        ms.fitBounds([[bbox[1], bbox[0]], [bbox[3], bbox[2]]])
+      }
+    })
+
+    const series = r.area_average_series || []
+    const maxAvg = Math.max(...series.map((s: any) => s.value_mm || 0), 0.1)
+    const bw = 370 / Math.max(series.length, 1)
+    let bars = ''
+    series.forEach((s: any, i: number) => {
+      const h = (s.value_mm || 0) / maxAvg * 80
+      const x = i * bw + 15
+      const color = h > 60 ? '#ff4400' : h > 30 ? '#ffaa00' : h > 5 ? '#3fb83c' : '#1a3a5a'
+      bars += `<rect x="${x}" y="${90 - h}" width="${Math.max(bw - 1, 1)}" height="${h}" fill="${color}" opacity=".75"/>`
+    })
+    const hydrograph = `<svg viewBox="0 0 400 110" class="tr-chart">${bars}<line x1="15" y1="90" x2="385" y2="90" stroke="#334" stroke-width="0.5"/><text x="15" y="10" fill="#667" font-size="9">面雨量过程线 (mm/h)</text></svg>`
+
+    const s = stats
+    const html = `
+      <div class="tr-recon-card" style="border-color:rgba(0,180,255,.25);background:rgba(0,140,255,.05)">
+        <div class="tr-recon-header" style="color:#00b4ff">🌧️ 气象网格降水分析</div>
+        <div style="font-size:10px;color:#64748b;margin-bottom:8px">${r.date_start || '?'} ~ ${r.date_end || '?'} | ${gs}×${gs}网格 | ${timeSteps.length}h</div>
+        <div class="tr-recon-stats">
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#ff6600">${(s.max_mm || 0).toFixed(1)}</span><span class="tr-recon-lbl">最大mm</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#00ccff">${(s.mean_mm || 0).toFixed(2)}</span><span class="tr-recon-lbl">平均mm</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#00ff88">${(s.total_area_avg_mm || 0).toFixed(1)}</span><span class="tr-recon-lbl">累计mm</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#ffaa00">${(s.peak_intensity_mm_hr || 0).toFixed(1)}</span><span class="tr-recon-lbl">峰值mm/h</span></div>
+        </div>
+        <div class="tr-sub" style="margin:6px 0">📍 暴雨中心: ${(s.peak_center?.lat || 0).toFixed(3)}, ${(s.peak_center?.lon || 0).toFixed(3)}</div>
+        ${hydrograph}
+        <div class="tr-sub" style="margin-top:4px">🎨 网格动画+时间轴已加载到地图下方</div>
+      </div>`
+    return { html, mapActions: actions }
+  },
 }
 
 /* ── Generic renderer (fallback) ── */
@@ -384,4 +600,145 @@ function esc(s: string) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
+/* ── Precipitation timeline + legend styles (injected once) ── */
+let _precipCssInjected = false
+function _injectPrecipCss() {
+  if (_precipCssInjected) return
+  _precipCssInjected = true
+  const style = document.createElement('style')
+  style.textContent = `
+.precip-timeline {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background: rgba(8, 14, 28, 0.92);
+  backdrop-filter: blur(16px);
+  border-top: 1px solid rgba(0, 212, 255, 0.15);
+  padding: 8px 16px;
+}
+.precip-timeline .ptl-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.precip-timeline .ptl-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  background: rgba(0, 212, 255, 0.06);
+  color: #00d4ff;
+  font-size: 14px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: all 0.15s;
+}
+.precip-timeline .ptl-btn:hover {
+  background: rgba(0, 212, 255, 0.15);
+  border-color: rgba(0, 212, 255, 0.4);
+}
+.precip-timeline .ptl-play {
+  width: 40px;
+  height: 40px;
+  font-size: 16px;
+  border-color: rgba(0, 212, 255, 0.4);
+  background: rgba(0, 212, 255, 0.1);
+}
+.precip-timeline .ptl-time {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+  font-family: 'JetBrains Mono', monospace;
+  min-width: 120px;
+  text-align: center;
+  text-shadow: 0 0 8px rgba(0, 212, 255, 0.2);
+}
+.precip-timeline .ptl-slider {
+  flex: 1;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(0, 212, 255, 0.1);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+.precip-timeline .ptl-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #00d4ff;
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+  cursor: pointer;
+}
+.precip-timeline .ptl-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #00d4ff;
+  border: none;
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+  cursor: pointer;
+}
+.precip-timeline .ptl-step {
+  font-size: 11px;
+  color: #64748b;
+  font-family: 'JetBrains Mono', monospace;
+  min-width: 50px;
+  text-align: right;
+}
+.precip-timeline .ptl-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+.precip-timeline .ptl-lg {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', monospace;
+}
+.precip-timeline .ptl-swatch {
+  width: 16px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.precip-timeline .ptl-lg-unit {
+  font-size: 10px;
+  color: #64748b;
+  margin-left: auto;
+}
+.precip-val {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  font-size: 10px !important;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+  font-family: 'JetBrains Mono', monospace;
+}
+.precip-tip {
+  background: rgba(10, 14, 26, 0.95);
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  color: #e2e8f0;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+`
+  document.head.appendChild(style)
+}
+_injectPrecipCss()
 
