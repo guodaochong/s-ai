@@ -126,7 +126,8 @@ DEM数据位于甘肃迭部县(104.89°E, 33.19°N)，0.5m分辨率，3GB GeoTIF
 - 查/查询 参数、数值 → 调 get_parameter
 - 涉及具体数值 → 必须调工具，不要捏造
 - 用户提到内涝/淹没/洪水/积水 → 必须调 flood_inundation_map
-- 用户问天气/降雨预报 → 调 weather_forecast
+- 用户问天气/降雨预报(单点预报) → 调 weather_forecast
+- 用户问降水分布/降雨网格/面雨量/暴雨分析(区域网格) → 调 precipitation_grid
 - 用户问卫星/遥感影像 → 调 satellite_search
 
 【3D重建规则】
@@ -285,7 +286,7 @@ _route_cache: dict[str, str] = {}
 _ROUTE_CACHE_MAX = 200
 
 
-_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool,reconstruct_3d".split(",")
+_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool,reconstruct_3d,precipitation_grid".split(",")
 
 _ROUTE_SYSTEM = """你是路由模块。只回复工具名或SIMPLE。
 
@@ -644,7 +645,135 @@ async def _get_weather(lat: float = 33.19, lon: float = 104.89, days: int = 3) -
         return {"error": str(e)[:200]}
 
 
-# ── 8. Digital Twin Bridge ───────────────────────────────────────────
+_precip_cache: dict[str, tuple[float, dict]] = {}
+
+
+async def _fetch_precipitation_grid(
+    bbox: list[float] | None = None,
+    date_start: str = "",
+    date_end: str = "",
+    grid_size: int = 8,
+) -> dict:
+    from datetime import datetime, timedelta
+
+    if not bbox or len(bbox) < 4:
+        bbox = [104.5, 33.0, 105.3, 33.5]
+    west, south, east, north = bbox[0], bbox[1], bbox[2], bbox[3]
+    gs = max(4, min(grid_size, 12))
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    if not date_end:
+        date_end = today
+    if not date_start:
+        date_start = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+
+    cache_key = f"{west:.2f}_{south:.2f}_{east:.2f}_{north:.2f}_{date_start}_{date_end}_{gs}"
+    if cache_key in _precip_cache and time.time() - _precip_cache[cache_key][0] < 600:
+        return _precip_cache[cache_key][1]
+
+    lats: list[float] = []
+    lons: list[float] = []
+    for i in range(gs):
+        lat = south + (north - south) * i / (gs - 1)
+        for j in range(gs):
+            lon = west + (east - west) * j / (gs - 1)
+            lats.append(round(lat, 4))
+            lons.append(round(lon, 4))
+
+    lat_str = ",".join(str(x) for x in lats)
+    lon_str = ",".join(str(x) for x in lons)
+
+    is_forecast = date_end >= today and date_start >= today
+    if is_forecast:
+        base_url = "https://api.open-meteo.com/v1/forecast"
+        model_param = ""
+    else:
+        base_url = "https://archive-api.open-meteo.com/v1/archive"
+        model_param = "&models=era5_land"
+    url = (
+        f"{base_url}?latitude={lat_str}&longitude={lon_str}"
+        f"&hourly=precipitation&start_date={date_start}&end_date={date_end}&timezone=Asia/Shanghai{model_param}"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            raw = resp.json()
+    except Exception as e:
+        return {"error": f"Open-Meteo API请求失败: {str(e)[:150]}"}
+
+    if isinstance(raw, list):
+        data_list = raw
+    else:
+        data_list = [raw]
+
+    time_labels: list[str] = []
+    precip_matrix: list[list[float]] = []
+    for idx, pt in enumerate(data_list):
+        hourly = pt.get("hourly", {})
+        times = hourly.get("time", [])
+        vals = hourly.get("precipitation", [])
+        if not time_labels:
+            time_labels = times
+        if len(precip_matrix) < len(vals):
+            precip_matrix = [[] for _ in range(len(vals))]
+        for t_idx, v in enumerate(vals):
+            precip_matrix[t_idx].append(float(v) if v is not None else 0.0)
+
+    if not time_labels or not precip_matrix:
+        return {"error": "未获取到降水数据"}
+
+    grid_lats = []
+    grid_lons = []
+    for i in range(gs):
+        for j in range(gs):
+            grid_lats.append(lats[i * gs + j])
+            grid_lons.append(lons[i * gs + j])
+
+    area_avg: list[float] = []
+    all_vals: list[float] = []
+    for frame in precip_matrix:
+        avg = sum(frame) / len(frame) if frame else 0
+        area_avg.append(round(avg, 2))
+        all_vals.extend(frame)
+
+    max_val = max(all_vals) if all_vals else 0
+    mean_val = sum(all_vals) / len(all_vals) if all_vals else 0
+    total_val = sum(area_avg)
+
+    peak_idx = area_avg.index(max(area_avg)) if area_avg else 0
+    peak_time = time_labels[peak_idx] if peak_idx < len(time_labels) else ""
+
+    peak_grid_idx = precip_matrix[peak_idx].index(max(precip_matrix[peak_idx])) if precip_matrix[peak_idx] else 0
+    peak_lat = grid_lats[peak_grid_idx] if peak_grid_idx < len(grid_lats) else 0
+    peak_lon = grid_lons[peak_grid_idx] if peak_grid_idx < len(grid_lons) else 0
+
+    result = {
+        "precipitation_grid": True,
+        "bbox": [west, south, east, north],
+        "date_start": date_start,
+        "date_end": date_end,
+        "grid_size": gs,
+        "data_source": "ERA5-Land 0.1° (~9km)" if not is_forecast else "Open-Meteo Forecast (~11km)",
+        "resolution_km": 9 if not is_forecast else 11,
+        "time_steps": time_labels,
+        "grid_lats": grid_lats,
+        "grid_lons": grid_lons,
+        "precipitation_matrix": precip_matrix,
+        "area_average_series": [{"time": t, "value_mm": v} for t, v in zip(time_labels, area_avg)],
+        "stats": {
+            "max_mm": round(max_val, 2),
+            "mean_mm": round(mean_val, 2),
+            "total_area_avg_mm": round(total_val, 2),
+            "peak_time": peak_time,
+            "peak_intensity_mm_hr": round(max(area_avg) if area_avg else 0, 2),
+            "peak_center": {"lat": round(peak_lat, 4), "lon": round(peak_lon, 4)},
+        },
+    }
+
+    _precip_cache[cache_key] = (time.time(), result)
+    return result
 
 class DigitalTwinBridge:
     def __init__(self):
@@ -1210,6 +1339,7 @@ GLM_TOOLS.extend([
     {"type": "function", "function": {"name": "scatter_interpolate", "description": "散点插值/克里金插值：将离散数据点插值为连续网格表面。支持克里金(Kriging)、IDW反距离加权、RBF径向基函数、linear/nearest/cubic方法。输入散点坐标和值，输出插值网格统计数据。", "parameters": {"type": "object", "properties": {"points_json": {"type": "string", "description": "散点JSON数组: [{\"x\":104.9,\"y\":33.15,\"z\":1200}, ...]"}, "method": {"type": "string", "description": "插值方法: kriging(克里金), idw(反距离), rbf(径向基), linear, nearest, cubic", "default": "linear"}, "grid_resolution": {"type": "integer", "description": "网格分辨率(NxN)", "default": 100}}, "required": []}}},
     {"type": "function", "function": {"name": "auto_tool", "description": "【最终兜底工具】自动生成并执行Python代码完成计算任务。当你发现现有工具无法满足用户需求时，必须调用此工具。适用场景：数学计算、公式推导、水力计算、水文分析、拟合统计、生成GeoJSON、绘制图表、表格计算、矩阵运算。不要输出代码文本，调用此工具即可自动执行。", "parameters": {"type": "object", "properties": {"requirement": {"type": "string", "description": "用户的完整需求描述，包含所有输入参数和期望输出格式"}, "params_json": {"type": "string", "description": "输入参数JSON，如{\"b\":2,\"h\":1.5,\"n\":0.015}"}}, "required": ["requirement"]}}},
     {"type": "function", "function": {"name": "reconstruct_3d", "description": "AI三维重建：从单张照片生成3D模型(GLB格式)。基于TripoSR大模型，单张照片秒出3D网格。适用场景：水工建筑物三维重建、堤防外观重建、桥梁结构建模、设备3D数字化。当用户上传图片并要求3D重建/三维建模时调用此工具。", "parameters": {"type": "object", "properties": {"image_path": {"type": "string", "description": "上传图片的文件路径（从对话上下文中的[上传图片路径:xxx]获取）"}}, "required": ["image_path"]}}},
+    {"type": "function", "function": {"name": "precipitation_grid", "description": "气象网格降水分析：自动获取最近3天的公开气象降水数据(Open-Meteo)，生成区域逐小时降水网格。输出动画热力图、面雨量过程线、暴雨中心定位。当用户询问降水分布/降雨网格/面雨量/暴雨分析时调用。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north] 经纬度范围，如[104.5,33.0,105.3,33.5]", "items": {"type": "number"}, "default": [104.5, 33.0, 105.3, 33.5]}, "grid_size": {"type": "integer", "description": "网格密度(N×N)，默认8", "default": 8}}, "required": []}}},
 ])
 
 TOOL_TO_SERVER["weather_forecast"] = "internal"
@@ -1217,13 +1347,15 @@ TOOL_TO_SERVER["satellite_search"] = "internal"
 TOOL_TO_SERVER["spatial_knowledge_query"] = "internal"
 TOOL_TO_SERVER["auto_tool"] = "internal"
 TOOL_TO_SERVER["reconstruct_3d"] = "internal"
+TOOL_TO_SERVER["precipitation_grid"] = "internal"
 
 ROUTING_RULES.extend([
-    (r"天气|天气预报|降雨预报|气象", "weather_forecast"),
+    (r"天气预报|降雨预报|气象预报|查天气", "weather_forecast"),
     (r"卫星|遥感|Sentinel|Landsat|影像", "satellite_search"),
     (r"知识图谱|相关实体|空间实体", "spatial_knowledge_query"),
     (r"散点插值|插值|griddata|IDW|克里金|Kriging|反距离|空间插值", "scatter_interpolate"),
     (r"3D|三维|3d|重建|reconstruct|建模|立体", "reconstruct_3d"),
+    (r"降水|降雨|雨量|面雨量|暴雨|precipitation|气象网格|降水监测|降水分析|降雨分析|降水分布|降雨分布", "precipitation_grid"),
 ])
 
 
@@ -1340,6 +1472,11 @@ async def _handle_internal_tool(tool_name: str, args: dict, user_msg: str = "") 
             "vram_peak_gb": meta.get("vram_peak_gb", 0),
             "message": f"3D重建完成: {meta.get('vertices', '?')}顶点, {meta.get('faces', '?')}面片, 耗时{meta.get('total_time', '?')}s",
         }
+    if tool_name == "precipitation_grid":
+        return await _fetch_precipitation_grid(
+            bbox=args.get("bbox"),
+            grid_size=args.get("grid_size", 8),
+        )
     return {"error": f"Unknown internal tool: {tool_name}"}
 
 
