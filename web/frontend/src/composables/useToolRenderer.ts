@@ -499,6 +499,162 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
       </div>`
     return { html, mapActions: actions }
   },
+
+  building_extract(r, ms) {
+    if (!r.building_extract) return { html: '', mapActions: [] }
+
+    const actions: (() => void)[] = []
+    const buildings = r.buildings || []
+    const count = r.count || buildings.length
+    const avgH = r.avg_height_m || 0
+    const totalA = r.total_area_m2 || 0
+    const bbox = r.bbox || []
+
+    function heightColor(h: number): { fill: string; stroke: string } {
+      if (h <= 3) return { fill: 'rgba(74,222,128,0.45)', stroke: '#4ade80' }
+      if (h <= 6) return { fill: 'rgba(34,211,238,0.45)', stroke: '#22d3ee' }
+      if (h <= 9) return { fill: 'rgba(96,165,250,0.45)', stroke: '#60a5fa' }
+      if (h <= 12) return { fill: 'rgba(167,139,250,0.45)', stroke: '#a78bfa' }
+      if (h <= 15) return { fill: 'rgba(244,114,182,0.45)', stroke: '#f472b6' }
+      if (h <= 20) return { fill: 'rgba(251,146,60,0.45)', stroke: '#fb923c' }
+      return { fill: 'rgba(239,68,68,0.5)', stroke: '#ef4444' }
+    }
+
+    actions.push(() => {
+      const map = ms.getMap()
+      if (!map) return
+
+      ;(map as any)._building_layer?.forEach((l: any) => map.removeLayer(l))
+      if ((map as any)._sat_layer) {
+        map.removeLayer((map as any)._sat_layer)
+        ;(map as any)._sat_layer = null
+      }
+      const container = map.getContainer()
+      const panel = container.closest('.map-panel') || container.parentElement
+      ;(panel as any)?.querySelector?.('#building-stats-panel')?.remove?.()
+
+      const satLayer = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 19, attribution: 'ArcGIS World Imagery', className: 'sat-base-layer' }
+      )
+      satLayer.addTo(map)
+      satLayer.bringToBack()
+      ;(map as any)._sat_layer = satLayer
+
+      const layers: any[] = []
+
+      buildings.forEach((f: any, idx: number) => {
+        const coords = f.geometry?.coordinates?.[0]
+        if (!coords || coords.length < 3) return
+
+        const h = f.properties?.height_m || 5
+        const c = heightColor(h)
+        const latlngs = coords.map((co: number[]) => [co[1], co[0]] as [number, number])
+
+        const polygon = L.polygon(latlngs, {
+          color: c.stroke,
+          weight: 1.5,
+          opacity: 0.9,
+          fillColor: c.stroke,
+          fillOpacity: 0.35,
+        })
+
+        const area = f.properties?.area_m2 || 0
+        const w = f.properties?.width_m || 0
+        const l2 = f.properties?.length_m || 0
+        const conf = f.properties?.confidence || 0
+
+        polygon.bindPopup(
+          `<div style="font-size:12px;line-height:1.6">
+             <b style="color:${c.stroke}">建筑 #${idx + 1}</b><br/>
+             <b>估算高度:</b> ${h}m<br/>
+             <b>占地面积:</b> ${area.toFixed(1)} m²<br/>
+             <b>尺寸:</b> ${w.toFixed(1)}m × ${l2.toFixed(1)}m<br/>
+             <b>置信度:</b> ${(conf * 100).toFixed(0)}%
+           </div>`
+        )
+
+        polygon.addTo(map)
+        layers.push(polygon)
+      })
+
+      ;(map as any)._building_layer = layers
+
+      if (layers.length > 0) {
+        const group = L.featureGroup(layers)
+        map.fitBounds(group.getBounds(), { padding: [50, 50] })
+      }
+
+      _injectBuildingCss()
+      if (panel) {
+        const statsDiv = document.createElement('div')
+        statsDiv.id = 'building-stats-panel'
+        statsDiv.className = 'building-stats-panel'
+        statsDiv.innerHTML = `
+          <div class="bsp-header">
+            <span class="bsp-icon">🏗️</span>
+            <span class="bsp-title">AI建筑提取结果</span>
+            <button class="bsp-close" onclick="this.parentElement.parentElement.remove()">✕</button>
+          </div>
+          <div class="bsp-body">
+            <div class="bsp-stat"><div class="bsp-val" style="color:#00ff88">${count}</div><div class="bsp-lbl">建筑数量</div></div>
+            <div class="bsp-stat"><div class="bsp-val" style="color:#00d4ff">${avgH.toFixed(1)}<span class="bsp-unit">m</span></div><div class="bsp-lbl">平均高度</div></div>
+            <div class="bsp-stat"><div class="bsp-val" style="color:#ffaa00">${(totalA / 10000).toFixed(2)}<span class="bsp-unit">ha</span></div><div class="bsp-lbl">总占地</div></div>
+          </div>
+          <div class="bsp-legend">
+            <div class="bsp-lg-title">建筑高度色阶</div>
+            <div class="bsp-lg-items">
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#4ade80"></span>≤3m</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#22d3ee"></span>3-6m</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#60a5fa"></span>6-9m</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#a78bfa"></span>9-12m</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#f472b6"></span>12-15m</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#fb923c"></span>15-20m</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#ef4444"></span>>20m</div>
+            </div>
+          </div>
+          <div class="bsp-source">📡 ${r.data_source || 'ArcGIS + SAM vit_b'} · Zoom ${r.zoom || '?'} · ${r.n_tiles || '?'} tiles</div>
+          <div class="bsp-toggle-row">
+            <button class="bsp-toggle-btn" id="bsp-sat-toggle">🛰️ 卫星影像: 开</button>
+          </div>
+        `
+        panel.appendChild(statsDiv)
+
+        const toggleBtn = statsDiv.querySelector('#bsp-sat-toggle')
+        if (toggleBtn) {
+          toggleBtn.addEventListener('click', () => {
+            const m = ms.getMap()
+            if (!m) return
+            const sat = (m as any)._sat_layer
+            if (!sat) return
+            if (m.hasLayer(sat)) {
+              m.removeLayer(sat)
+              toggleBtn.textContent = '🛰️ 卫星影像: 关'
+            } else {
+              m.addLayer(sat)
+              sat.bringToBack()
+              toggleBtn.textContent = '🛰️ 卫星影像: 开'
+            }
+          })
+        }
+      }
+    })
+
+    const html = `
+      <div class="tr-recon-card">
+        <div class="tr-recon-header" style="color:#00ff88">🏗️ AI建筑提取完成</div>
+        <div style="font-size:10px;color:#64748b;margin-bottom:8px">
+          ${r.data_source || 'ArcGIS World Imagery + SAM vit_b'} | Zoom ${r.zoom || '?'} | ${r.n_tiles || '?'} tiles
+        </div>
+        <div class="tr-recon-stats">
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#00ff88">${count}</span><span class="tr-recon-lbl">建筑数</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#00d4ff">${avgH.toFixed(1)}m</span><span class="tr-recon-lbl">平均高</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#ffaa00">${(totalA / 10000).toFixed(2)}ha</span><span class="tr-recon-lbl">总占地</span></div>
+        </div>
+        <div class="tr-sub" style="margin-top:4px">📍 ${count}栋建筑已渲染到地图，点击建筑查看详情</div>
+      </div>`
+    return { html, mapActions: actions }
+  },
 }
 
 /* ── Generic renderer (fallback) ── */
@@ -741,4 +897,148 @@ function _injectPrecipCss() {
   document.head.appendChild(style)
 }
 _injectPrecipCss()
+
+let _buildingCssInjected = false
+function _injectBuildingCss() {
+  if (_buildingCssInjected) return
+  _buildingCssInjected = true
+  const style = document.createElement('style')
+  style.textContent = `
+.building-stats-panel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1000;
+  width: 280px;
+  background: rgba(8, 14, 28, 0.92);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 255, 136, 0.15);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+.building-stats-panel .bsp-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(0, 255, 136, 0.06);
+  border-bottom: 1px solid rgba(0, 255, 136, 0.1);
+}
+.building-stats-panel .bsp-icon { font-size: 16px; }
+.building-stats-panel .bsp-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #00ff88;
+  flex: 1;
+}
+.building-stats-panel .bsp-close {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: none;
+  background: rgba(255,255,255,0.05);
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 12px;
+  display: grid;
+  place-items: center;
+  transition: all 0.15s;
+}
+.building-stats-panel .bsp-close:hover {
+  background: rgba(239,68,68,0.15);
+  color: #ef4444;
+}
+.building-stats-panel .bsp-body {
+  display: flex;
+  gap: 1px;
+  padding: 0;
+  background: rgba(255,255,255,0.03);
+}
+.building-stats-panel .bsp-stat {
+  flex: 1;
+  text-align: center;
+  padding: 12px 4px;
+  background: rgba(8,14,28,0.6);
+}
+.building-stats-panel .bsp-val {
+  font-size: 22px;
+  font-weight: 800;
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1.2;
+}
+.building-stats-panel .bsp-unit {
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.6;
+}
+.building-stats-panel .bsp-lbl {
+  font-size: 10px;
+  color: #64748b;
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.building-stats-panel .bsp-legend {
+  padding: 10px 14px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+.building-stats-panel .bsp-lg-title {
+  font-size: 10px;
+  color: #64748b;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.building-stats-panel .bsp-lg-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.building-stats-panel .bsp-lg-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', monospace;
+}
+.building-stats-panel .bsp-swatch {
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.building-stats-panel .bsp-source {
+  font-size: 9px;
+  color: #475569;
+  padding: 6px 14px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  font-family: 'JetBrains Mono', monospace;
+}
+.building-stats-panel .bsp-toggle-row {
+  padding: 8px 14px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+.building-stats-panel .bsp-toggle-btn {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  background: rgba(0, 212, 255, 0.06);
+  color: #00d4ff;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.building-stats-panel .bsp-toggle-btn:hover {
+  background: rgba(0, 212, 255, 0.15);
+  border-color: rgba(0, 212, 255, 0.4);
+}
+.sat-base-layer {
+  filter: brightness(0.7) contrast(1.1);
+}
+`
+  document.head.appendChild(style)
+}
 
