@@ -52,3 +52,7 @@ data/generated_tools/
 
 # Test scripts
 test_*.py
+
+# SAM model checkpoint
+web/segment/models/*.pth
+*.pth
