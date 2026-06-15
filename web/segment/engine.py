@@ -56,6 +56,22 @@ def _is_building_like(area_m2: float, aspect: float, solidity: float) -> bool:
     return True
 
 
+def _classify_building(area_m2: float, height_m: int, aspect: float, solidity: float) -> dict:
+    if area_m2 < 80 and height_m <= 6:
+        return {"type": "附属设施", "icon": "🔧", "color": "#94a3b8"}
+    if area_m2 > 1500 and (aspect > 2.5 or height_m <= 9):
+        return {"type": "工业仓储", "icon": "🏭", "color": "#f59e0b"}
+    if area_m2 > 1200 and solidity < 0.65:
+        return {"type": "公共设施", "icon": "🏫", "color": "#a78bfa"}
+    if area_m2 < 300 and height_m <= 9:
+        return {"type": "低层住宅", "icon": "🏠", "color": "#4ade80"}
+    if area_m2 < 800 and height_m >= 12:
+        return {"type": "高层住宅", "icon": "🏢", "color": "#60a5fa"}
+    if area_m2 >= 500 and height_m >= 12:
+        return {"type": "商业办公", "icon": "🏬", "color": "#22d3ee"}
+    return {"type": "一般建筑", "icon": "🏢", "color": "#64748b"}
+
+
 def segment_buildings(image: np.ndarray, bbox: list[float]) -> dict:
     import cv2
     from .tile_fetcher import pixel_to_lonlat
@@ -107,6 +123,7 @@ def segment_buildings(image: np.ndarray, bbox: list[float]) -> dict:
 
         area_m2 = _pixel_area_to_m2(area_px, bbox, w, h)
         est_height = _estimate_height(area_m2)
+        btype = _classify_building(area_m2, est_height, aspect, solidity)
 
         cx_px = x + bw // 2
         cy_px = y + bh // 2
@@ -120,6 +137,9 @@ def segment_buildings(image: np.ndarray, bbox: list[float]) -> dict:
             "footprint_w_m": round(_pixels_to_m(bw, bbox, w, h, "x"), 1),
             "footprint_h_m": round(_pixels_to_m(bh, bbox, w, h, "y"), 1),
             "confidence": round(m.get("predicted_iou", 0.9), 3),
+            "building_type": btype["type"],
+            "type_icon": btype["icon"],
+            "type_color": btype["color"],
         })
 
     logger.info(f"[SAM] Filtered to {len(buildings)} building-like shapes")
@@ -136,6 +156,9 @@ def segment_buildings(image: np.ndarray, bbox: list[float]) -> dict:
                 "length_m": b["footprint_h_m"],
                 "confidence": b["confidence"],
                 "center": b["center"],
+                "building_type": b["building_type"],
+                "type_icon": b["type_icon"],
+                "type_color": b["type_color"],
             },
         })
 
