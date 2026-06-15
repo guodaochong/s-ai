@@ -209,6 +209,8 @@ def _compress_result(tool: str, result: dict) -> str:
         return f"点位: 高程={result.get('elevation_m','?')}m 坡度={result.get('slope_deg','?')}°"
     if tool == "terrain_profile":
         return f"剖面: 长{result.get('total_distance_m','?')}m 高差{round(result.get('max_elevation_m',0)-result.get('min_elevation_m',0),1)}m"
+    if tool == "building_extract":
+        return f"建筑提取: {result.get('count','?')}栋 平均高{result.get('avg_height_m','?')}m 总面积{result.get('total_area_m2','?')}m²"
     return json.dumps(result, ensure_ascii=False)[:200]
 
 
@@ -286,7 +288,7 @@ _route_cache: dict[str, str] = {}
 _ROUTE_CACHE_MAX = 200
 
 
-_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool,reconstruct_3d,precipitation_grid".split(",")
+_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool,reconstruct_3d,precipitation_grid,building_extract".split(",")
 
 _ROUTE_SYSTEM = """你是路由模块。只回复工具名或SIMPLE。
 
@@ -774,6 +776,85 @@ async def _fetch_precipitation_grid(
 
     _precip_cache[cache_key] = (time.time(), result)
     return result
+
+
+_CITY_COORDS = {
+    "天水": (105.7249, 34.5809), "兰州": (103.8343, 36.0611), "西安": (108.9398, 34.3416),
+    "北京": (116.4074, 39.9042), "上海": (121.4737, 31.2304), "成都": (104.0657, 30.5723),
+    "重庆": (106.5516, 29.5630), "武汉": (114.3055, 30.5928), "南京": (118.7969, 32.0603),
+    "杭州": (120.1551, 30.2741), "广州": (113.2644, 23.1291), "深圳": (114.0579, 22.5431),
+    "陇南": (104.9219, 33.3886), "定西": (104.6264, 35.5796), "平凉": (106.6652, 35.5428),
+    "庆阳": (107.6380, 35.7342), "酒泉": (98.4941, 39.7320), "张掖": (100.4496, 38.9252),
+    "武威": (102.6385, 37.9283), "白银": (104.1386, 36.5447), "嘉峪关": (98.2773, 39.7865),
+    "金昌": (102.1880, 38.5160), "临夏": (103.2104, 35.6011), "甘南": (102.9109, 34.9834),
+}
+
+
+async def _geocode_city(name: str) -> tuple[float, float] | None:
+    for city, coord in _CITY_COORDS.items():
+        if city in name:
+            return coord
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": name, "format": "json", "limit": 1, "accept-language": "zh"},
+                headers={"User-Agent": "S-AI/1.0"},
+            )
+            data = resp.json()
+            if data:
+                return float(data[0]["lon"]), float(data[0]["lat"])
+    except Exception:
+        pass
+    return None
+
+
+async def _extract_buildings(bbox=None, location=None):
+    import sys, os
+    sys.path.insert(0, str(Path(__file__).parent))
+    from segment.tile_fetcher import fetch_tiles_for_bbox
+    from segment.engine import segment_buildings
+
+    if not bbox or len(bbox) != 4 or not all(isinstance(v, (int, float)) for v in bbox):
+        if location:
+            coord = await _geocode_city(location)
+            if coord:
+                cx, cy = coord
+                half = 0.0075
+                bbox = [cx - half, cy - half, cx + half, cy + half]
+                logger.info(f"[building_extract] Geocoded '{location}' -> ({cx:.4f}, {cy:.4f})")
+        if not bbox:
+            bbox = [105.725, 34.580, 105.745, 34.595]
+    west, south, east, north = bbox
+
+    max_span = 0.015
+    cx, cy = (west + east) / 2, (south + north) / 2
+    if abs(east - west) > max_span or abs(north - south) > max_span:
+        logger.info(f"[building_extract] bbox too large, clamping to {max_span}deg centered on ({cx:.4f},{cy:.4f})")
+        west = cx - max_span / 2
+        east = cx + max_span / 2
+        south = cy - max_span / 2
+        north = cy + max_span / 2
+
+    zoom = 18
+
+    logger.info(f"[building_extract] Fetching tiles bbox={bbox} zoom={zoom}")
+    tile_data = await fetch_tiles_for_bbox(west, south, east, north, zoom=zoom)
+
+    img = tile_data["image"]
+    tile_bbox = tile_data["bbox"]
+
+    logger.info(f"[building_extract] Image {tile_data['width']}x{tile_data['height']}, running SAM...")
+    result = await asyncio.to_thread(segment_buildings, img, tile_bbox)
+
+    result["building_extract"] = True
+    result["data_source"] = "ArcGIS World Imagery + SAM vit_b"
+    result["zoom"] = tile_data["zoom"]
+    result["n_tiles"] = tile_data["n_tiles"]
+
+    logger.info(f"[building_extract] Done: {result['count']} buildings extracted")
+    return result
+
 
 class DigitalTwinBridge:
     def __init__(self):
@@ -1333,13 +1414,14 @@ def _validate_sim_params(params: dict, sim_type: str) -> dict:
 # ── 15. Add new tools to GLM_TOOLS + TOOL_TO_SERVER ──────────────────
 
 GLM_TOOLS.extend([
-    {"type": "function", "function": {"name": "weather_forecast", "description": "获取天气预报数据(降雨、温度、风速)", "parameters": {"type": "object", "properties": {"latitude": {"type": "number", "default": 33.19}, "longitude": {"type": "number", "default": 104.89}, "forecast_days": {"type": "integer", "default": 3}}, "required": []}}},
+    {"type": "function", "function": {"name": "weather_forecast", "description": "获取天气预报数据(温度、风速、湿度)，返回简单文本数据。注意：此工具不提供降雨过程动画，降雨相关查询请用precipitation_grid。", "parameters": {"type": "object", "properties": {"latitude": {"type": "number", "default": 33.19}, "longitude": {"type": "number", "default": 104.89}, "forecast_days": {"type": "integer", "default": 3}}, "required": []}}},
     {"type": "function", "function": {"name": "satellite_search", "description": "搜索卫星遥感影像(Sentinel-2)", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]", "items": {"type": "number"}}, "date_start": {"type": "string", "description": "开始日期 YYYY-MM-DD"}, "date_end": {"type": "string", "description": "结束日期 YYYY-MM-DD"}}, "required": []}}},
     {"type": "function", "function": {"name": "spatial_knowledge_query", "description": "查询空间知识图谱(实体和关系)", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "查询关键词"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "scatter_interpolate", "description": "散点插值/克里金插值：将离散数据点插值为连续网格表面。支持克里金(Kriging)、IDW反距离加权、RBF径向基函数、linear/nearest/cubic方法。输入散点坐标和值，输出插值网格统计数据。", "parameters": {"type": "object", "properties": {"points_json": {"type": "string", "description": "散点JSON数组: [{\"x\":104.9,\"y\":33.15,\"z\":1200}, ...]"}, "method": {"type": "string", "description": "插值方法: kriging(克里金), idw(反距离), rbf(径向基), linear, nearest, cubic", "default": "linear"}, "grid_resolution": {"type": "integer", "description": "网格分辨率(NxN)", "default": 100}}, "required": []}}},
     {"type": "function", "function": {"name": "auto_tool", "description": "【最终兜底工具】自动生成并执行Python代码完成计算任务。当你发现现有工具无法满足用户需求时，必须调用此工具。适用场景：数学计算、公式推导、水力计算、水文分析、拟合统计、生成GeoJSON、绘制图表、表格计算、矩阵运算。不要输出代码文本，调用此工具即可自动执行。", "parameters": {"type": "object", "properties": {"requirement": {"type": "string", "description": "用户的完整需求描述，包含所有输入参数和期望输出格式"}, "params_json": {"type": "string", "description": "输入参数JSON，如{\"b\":2,\"h\":1.5,\"n\":0.015}"}}, "required": ["requirement"]}}},
     {"type": "function", "function": {"name": "reconstruct_3d", "description": "AI三维重建：从单张照片生成3D模型(GLB格式)。基于TripoSR大模型，单张照片秒出3D网格。适用场景：水工建筑物三维重建、堤防外观重建、桥梁结构建模、设备3D数字化。当用户上传图片并要求3D重建/三维建模时调用此工具。", "parameters": {"type": "object", "properties": {"image_path": {"type": "string", "description": "上传图片的文件路径（从对话上下文中的[上传图片路径:xxx]获取）"}}, "required": ["image_path"]}}},
-    {"type": "function", "function": {"name": "precipitation_grid", "description": "气象网格降水分析：自动获取最近3天的公开气象降水数据(Open-Meteo)，生成区域逐小时降水网格。输出动画热力图、面雨量过程线、暴雨中心定位。当用户询问降水分布/降雨网格/面雨量/暴雨分析时调用。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north] 经纬度范围，如[104.5,33.0,105.3,33.5]", "items": {"type": "number"}, "default": [104.5, 33.0, 105.3, 33.5]}, "grid_size": {"type": "integer", "description": "网格密度(N×N)，默认8", "default": 8}}, "required": []}}},
+    {"type": "function", "function": {"name": "precipitation_grid", "description": "气象网格降水分析：自动获取最近3天的公开气象降水数据(Open-Meteo)，生成区域逐小时降水网格动画热力图、面雨量过程线、暴雨中心定位。用户询问降水预报/降雨过程/降水分布/降雨网格/面雨量/暴雨分析时必须调用此工具，不要用weather_forecast。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north] 经纬度范围，如[104.5,33.0,105.3,33.5]", "items": {"type": "number"}, "default": [104.5, 33.0, 105.3, 33.5]}, "grid_size": {"type": "integer", "description": "网格密度(N×N)，默认8", "default": 8}}, "required": []}}},
+    {"type": "function", "function": {"name": "building_extract", "description": "AI建筑提取与3D建模：自动下载目标区域高清卫星影像，利用SAM大模型分割所有建筑物轮廓，估算建筑高度，生成3D拉伸白模叠到地图上。输出GeoJSON建筑 footprint + 高度数据。当用户要求建筑识别/建筑提取/建筑物识别/房子识别/地物提取/卫星建筑/3D城市建模时调用。注意：需要选择城市/城镇区域，山区农田没有建筑。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "城市或地点名称，如'天水'、'兰州'、'西安'、'陇南'。当用户提到城市名时填此项。"}}, "required": []}}},
 ])
 
 TOOL_TO_SERVER["weather_forecast"] = "internal"
@@ -1348,6 +1430,7 @@ TOOL_TO_SERVER["spatial_knowledge_query"] = "internal"
 TOOL_TO_SERVER["auto_tool"] = "internal"
 TOOL_TO_SERVER["reconstruct_3d"] = "internal"
 TOOL_TO_SERVER["precipitation_grid"] = "internal"
+TOOL_TO_SERVER["building_extract"] = "internal"
 
 ROUTING_RULES.extend([
     (r"天气预报|降雨预报|气象预报|查天气", "weather_forecast"),
@@ -1355,7 +1438,8 @@ ROUTING_RULES.extend([
     (r"知识图谱|相关实体|空间实体", "spatial_knowledge_query"),
     (r"散点插值|插值|griddata|IDW|克里金|Kriging|反距离|空间插值", "scatter_interpolate"),
     (r"3D|三维|3d|重建|reconstruct|建模|立体", "reconstruct_3d"),
-    (r"降水|降雨|雨量|面雨量|暴雨|precipitation|气象网格|降水监测|降水分析|降雨分析|降水分布|降雨分布", "precipitation_grid"),
+    (r"降水|降雨|雨量|面雨量|暴雨|precipitation|气象网格|降水监测|降水分析|降雨分析|降水分布|降雨分布|降水预报|降雨过程|降雨预报", "precipitation_grid"),
+    (r"建筑识别|建筑提取|建筑物|建筑|房子识别|楼房|地物提取|卫星建筑|城市建模|建筑分割|building|建筑3D|建筑三维", "building_extract"),
 ])
 
 
@@ -1477,6 +1561,8 @@ async def _handle_internal_tool(tool_name: str, args: dict, user_msg: str = "") 
             bbox=args.get("bbox"),
             grid_size=args.get("grid_size", 8),
         )
+    if tool_name == "building_extract":
+        return await _extract_buildings(args.get("bbox"), args.get("location"))
     return {"error": f"Unknown internal tool: {tool_name}"}
 
 
@@ -1748,7 +1834,7 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
             {"role": "user", "content": message},
         ]
         if is_direct:
-            react_messages.append({"role": "assistant", "content": f"建议使用 {direct_tool} 工具。如果该工具不适合当前任务，请改用 auto_tool。"})
+            react_messages.append({"role": "assistant", "content": f"请直接调用 {direct_tool} 工具完成此任务。这是一个专用工具，效果远优于 auto_tool。不要使用 auto_tool。"})
         elif not is_simple:
             plan_header = f"""已制定执行计划，你必须严格按顺序逐步执行全部步骤。不要跳过任何步骤，不要提前结束。
 
