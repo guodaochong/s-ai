@@ -374,14 +374,23 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
         })
         layerGroup.addTo(map)
 
-        const peakPt = stats.peak_center
-        if (peakPt) {
-          const m = L.circleMarker([peakPt.lat, peakPt.lon], {
-            radius: 8, fillColor: '#ff0000', color: '#fff', weight: 2, fillOpacity: 1,
+        const sc: any[] = r.storm_centers || []
+        const scInfo = sc.find((s: any) => s.time === timeSteps[step]) || sc[step]
+        if (scInfo) {
+          const sm = L.circleMarker([scInfo.lat, scInfo.lon], {
+            radius: 10, fillColor: '#ff0000', color: '#fff', weight: 3, fillOpacity: 0.95,
           })
-          m.bindPopup(`<b>暴雨中心</b><br>${(stats.peak_intensity_mm_hr || 0).toFixed(1)}mm/h<br>${precipLabel(stats.peak_intensity_mm_hr || 0)}<br>${stats.peak_time || ''}`)
-          m.addTo(map)
-          layers.push(m)
+          const place = scInfo.place || ''
+          sm.bindPopup(
+            `<div style="font-size:12px;line-height:1.5">
+               <b style="color:#ff0000">🌧️ 暴雨中心</b><br/>
+               <b>强度:</b> ${scInfo.mm.toFixed(1)}mm/h ${precipLabel(scInfo.mm)}<br/>
+               <b>时间:</b> ${(scInfo.time || '').replace('T', ' ').slice(0, 16)}<br/>
+               ${place ? `<b>位置:</b> ${place}` : `<b>坐标:</b> ${scInfo.lat}, ${scInfo.lon}`}
+             </div>`
+          )
+          sm.addTo(map)
+          layers.push(sm)
         }
 
         updateTimelineUI(step)
@@ -392,11 +401,14 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
         const timeLabel = panel?.querySelector('#precip-cur-time') as HTMLElement
         const slider = panel?.querySelector('#precip-slider') as HTMLInputElement
         const stepInfo = panel?.querySelector('#precip-step-info') as HTMLElement
+        const sc2: any[] = r.storm_centers || []
+        const scInfo2 = sc2.find((s: any) => s.time === timeSteps[step]) || sc2[step]
         if (timeLabel) {
           const t = timeSteps[step] || ''
           const d = t.slice(0, 10)
           const h = t.slice(11, 16)
-          timeLabel.textContent = `${d} ${h}`
+          const place = scInfo2?.place || ''
+          timeLabel.textContent = place ? `${d} ${h} · 📍${place}` : `${d} ${h}`
         }
         if (playBtn) playBtn.textContent = playing ? '⏸' : '▶'
         if (slider) slider.value = String(step)
@@ -527,6 +539,11 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
       ;(map as any)._building_layer?.forEach((l: any) => map.removeLayer(l))
       if ((map as any)._sat_layer) {
         map.removeLayer((map as any)._sat_layer)
+        map.eachLayer((layer: any) => {
+          if (layer instanceof L.TileLayer) {
+            layer.setOpacity(layer._orig_opacity ?? 1)
+          }
+        })
         ;(map as any)._sat_layer = null
       }
       const container = map.getContainer()
@@ -541,6 +558,13 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
       satLayer.bringToBack()
       ;(map as any)._sat_layer = satLayer
 
+      map.eachLayer((layer: any) => {
+        if (layer instanceof L.TileLayer && layer !== satLayer) {
+          layer._orig_opacity = layer.options.opacity ?? 1
+          layer.setOpacity(0)
+        }
+      })
+
       const layers: any[] = []
 
       buildings.forEach((f: any, idx: number) => {
@@ -551,12 +575,16 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
         const c = heightColor(h)
         const latlngs = coords.map((co: number[]) => [co[1], co[0]] as [number, number])
 
+        const tColor = f.properties?.type_color || c.stroke
+        const tIcon = f.properties?.type_icon || '🏢'
+        const tName = f.properties?.building_type || '建筑'
+
         const polygon = L.polygon(latlngs, {
-          color: c.stroke,
+          color: tColor,
           weight: 1.5,
           opacity: 0.9,
-          fillColor: c.stroke,
-          fillOpacity: 0.35,
+          fillColor: tColor,
+          fillOpacity: 0.4,
         })
 
         const area = f.properties?.area_m2 || 0
@@ -566,7 +594,7 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
 
         polygon.bindPopup(
           `<div style="font-size:12px;line-height:1.6">
-             <b style="color:${c.stroke}">建筑 #${idx + 1}</b><br/>
+             <b style="color:${tColor}">${tIcon} ${tName} #${idx + 1}</b><br/>
              <b>估算高度:</b> ${h}m<br/>
              <b>占地面积:</b> ${area.toFixed(1)} m²<br/>
              <b>尺寸:</b> ${w.toFixed(1)}m × ${l2.toFixed(1)}m<br/>
@@ -602,15 +630,14 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
             <div class="bsp-stat"><div class="bsp-val" style="color:#ffaa00">${(totalA / 10000).toFixed(2)}<span class="bsp-unit">ha</span></div><div class="bsp-lbl">总占地</div></div>
           </div>
           <div class="bsp-legend">
-            <div class="bsp-lg-title">建筑高度色阶</div>
+            <div class="bsp-lg-title">建筑类型分类</div>
             <div class="bsp-lg-items">
-              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#4ade80"></span>≤3m</div>
-              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#22d3ee"></span>3-6m</div>
-              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#60a5fa"></span>6-9m</div>
-              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#a78bfa"></span>9-12m</div>
-              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#f472b6"></span>12-15m</div>
-              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#fb923c"></span>15-20m</div>
-              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#ef4444"></span>>20m</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#4ade80"></span>🏠 低层住宅</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#60a5fa"></span>🏢 高层住宅</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#22d3ee"></span>🏬 商业办公</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#f59e0b"></span>🏭 工业仓储</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#a78bfa"></span>🏫 公共设施</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#94a3b8"></span>🔧 附属设施</div>
             </div>
           </div>
           <div class="bsp-source">📡 ${r.data_source || 'ArcGIS + SAM vit_b'} · Zoom ${r.zoom || '?'} · ${r.n_tiles || '?'} tiles</div>
@@ -629,10 +656,20 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
             if (!sat) return
             if (m.hasLayer(sat)) {
               m.removeLayer(sat)
+              m.eachLayer((layer: any) => {
+                if (layer instanceof L.TileLayer && layer !== sat) {
+                  layer.setOpacity(layer._orig_opacity ?? 1)
+                }
+              })
               toggleBtn.textContent = '🛰️ 卫星影像: 关'
             } else {
               m.addLayer(sat)
               sat.bringToBack()
+              m.eachLayer((layer: any) => {
+                if (layer instanceof L.TileLayer && layer !== sat) {
+                  layer.setOpacity(0)
+                }
+              })
               toggleBtn.textContent = '🛰️ 卫星影像: 开'
             }
           })
@@ -652,6 +689,109 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
           <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#ffaa00">${(totalA / 10000).toFixed(2)}ha</span><span class="tr-recon-lbl">总占地</span></div>
         </div>
         <div class="tr-sub" style="margin-top:4px">📍 ${count}栋建筑已渲染到地图，点击建筑查看详情</div>
+      </div>`
+    return { html, mapActions: actions }
+  },
+
+  water_monitor(r, ms) {
+    if (!r.water_monitor) return { html: '', mapActions: [] }
+
+    const actions: (() => void)[] = []
+    const bodies = r.water_bodies || []
+    const count = r.water_body_count || bodies.length
+    const totalArea = r.total_water_area_km2 || 0
+    const coverage = r.water_coverage_pct || 0
+    const date = r.date || '?'
+    const cloud = r.cloud_cover || 0
+    const ndwiRange = r.ndwi_range || [0, 0]
+
+    actions.push(() => {
+      const map = ms.getMap()
+      if (!map) return
+
+      ;(map as any)._water_layer?.forEach((l: any) => map.removeLayer(l))
+      const container = map.getContainer()
+      const panel = container.closest('.map-panel') || container.parentElement
+      ;(panel as any)?.querySelector?.('#water-stats-panel')?.remove?.()
+
+      const layers: any[] = []
+
+      bodies.forEach((f: any, idx: number) => {
+        const coords = f.geometry?.coordinates?.[0]
+        if (!coords || coords.length < 3) return
+        const latlngs = coords.map((c: number[]) => [c[1], c[0]] as [number, number])
+        const area = f.properties?.area_m2 || 0
+        const ndwi = f.properties?.ndwi_mean || 0
+
+        const polygon = L.polygon(latlngs, {
+          color: '#00aaff',
+          weight: 2,
+          opacity: 0.9,
+          fillColor: '#0066cc',
+          fillOpacity: 0.6,
+        })
+
+        polygon.bindPopup(
+          `<div style="font-size:12px;line-height:1.6">
+             <b style="color:#00aaff">水体 #${idx + 1}</b><br/>
+             <b>面积:</b> ${(area / 10000).toFixed(2)} ha<br/>
+             <b>NDWI均值:</b> ${ndwi.toFixed(3)}<br/>
+             <b>中心:</b> ${f.properties?.center?.[1]?.toFixed(4)}, ${f.properties?.center?.[0]?.toFixed(4)}
+           </div>`
+        )
+
+        polygon.addTo(map)
+        layers.push(polygon)
+      })
+
+      ;(map as any)._water_layer = layers
+
+      if (layers.length > 0) {
+        const group = L.featureGroup(layers)
+        map.fitBounds(group.getBounds(), { padding: [50, 50] })
+      } else if (r.bbox) {
+        const b = r.bbox
+        map.fitBounds([[b[1], b[0]], [b[3], b[2]]], { padding: [50, 50] })
+      }
+
+      _injectBuildingCss()
+      if (panel) {
+        const statsDiv = document.createElement('div')
+        statsDiv.id = 'water-stats-panel'
+        statsDiv.className = 'building-stats-panel'
+        statsDiv.innerHTML = `
+          <div class="bsp-header" style="background:rgba(0,170,255,0.06);border-color:rgba(0,170,255,0.1)">
+            <span class="bsp-icon">🌊</span>
+            <span class="bsp-title" style="color:#00aaff">遥感水体监测</span>
+            <button class="bsp-close" onclick="this.parentElement.parentElement.remove()">✕</button>
+          </div>
+          <div class="bsp-body">
+            <div class="bsp-stat"><div class="bsp-val" style="color:#00aaff">${count}</div><div class="bsp-lbl">水体数</div></div>
+            <div class="bsp-stat"><div class="bsp-val" style="color:#00d4ff">${totalArea.toFixed(3)}<span class="bsp-unit">km²</span></div><div class="bsp-lbl">水面面积</div></div>
+            <div class="bsp-stat"><div class="bsp-val" style="color:#4ade80">${coverage.toFixed(1)}<span class="bsp-unit">%</span></div><div class="bsp-lbl">覆盖率</div></div>
+          </div>
+          <div class="bsp-source" style="border-color:rgba(0,170,255,0.06)">
+            📡 Sentinel-2 L2A 10m<br/>
+            📅 ${date} · 云量${cloud}%<br/>
+            📊 NDWI: [${ndwiRange[0]}, ${ndwiRange[1]}]
+          </div>
+        `
+        panel.appendChild(statsDiv)
+      }
+    })
+
+    const html = `
+      <div class="tr-recon-card">
+        <div class="tr-recon-header" style="color:#00aaff">🌊 遥感水体监测完成</div>
+        <div style="font-size:10px;color:#64748b;margin-bottom:8px">
+          Sentinel-2 L2A 10m | ${date} | 云量${cloud}%
+        </div>
+        <div class="tr-recon-stats">
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#00aaff">${count}</span><span class="tr-recon-lbl">水体数</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#00d4ff">${totalArea.toFixed(3)}km²</span><span class="tr-recon-lbl">水面面积</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#4ade80">${coverage.toFixed(1)}%</span><span class="tr-recon-lbl">覆盖率</span></div>
+        </div>
+        <div class="tr-sub" style="margin-top:4px">📍 ${count}处水体已渲染到地图，点击查看详情</div>
       </div>`
     return { html, mapActions: actions }
   },
