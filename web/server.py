@@ -211,6 +211,8 @@ def _compress_result(tool: str, result: dict) -> str:
         return f"剖面: 长{result.get('total_distance_m','?')}m 高差{round(result.get('max_elevation_m',0)-result.get('min_elevation_m',0),1)}m"
     if tool == "building_extract":
         return f"建筑提取: {result.get('count','?')}栋 平均高{result.get('avg_height_m','?')}m 总面积{result.get('total_area_m2','?')}m²"
+    if tool == "water_monitor":
+        return f"水体监测: {result.get('water_body_count','?')}处水体 水面{result.get('total_water_area_km2','?')}km² 覆盖率{result.get('water_coverage_pct','?')}% 日期{result.get('date','?')}"
     return json.dumps(result, ensure_ascii=False)[:200]
 
 
@@ -288,7 +290,7 @@ _route_cache: dict[str, str] = {}
 _ROUTE_CACHE_MAX = 200
 
 
-_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool,reconstruct_3d,precipitation_grid,building_extract".split(",")
+_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool,reconstruct_3d,precipitation_grid,building_extract,water_monitor".split(",")
 
 _ROUTE_SYSTEM = """你是路由模块。只回复工具名或SIMPLE。
 
@@ -655,19 +657,41 @@ async def _fetch_precipitation_grid(
     date_start: str = "",
     date_end: str = "",
     grid_size: int = 8,
+    forecast_mode: bool = False,
+    location: str = "",
 ) -> dict:
     from datetime import datetime, timedelta
 
     if not bbox or len(bbox) < 4:
-        bbox = [104.5, 33.0, 105.3, 33.5]
+        if location:
+            coord = await _geocode_city(location)
+            if coord:
+                cx, cy = coord
+                half = 0.4
+                bbox = [cx - half, cy - half, cx + half, cy + half]
+        if not bbox:
+            bbox = [104.5, 33.0, 105.3, 33.5]
     west, south, east, north = bbox[0], bbox[1], bbox[2], bbox[3]
+
+    min_span = 0.5
+    cx, cy = (west + east) / 2, (south + north) / 2
+    if abs(east - west) < min_span or abs(north - south) < min_span:
+        west = cx - min_span / 2
+        east = cx + min_span / 2
+        south = cy - min_span / 2
+        north = cy + min_span / 2
+
     gs = max(4, min(grid_size, 12))
 
     today = datetime.now().strftime("%Y-%m-%d")
-    if not date_end:
-        date_end = today
-    if not date_start:
-        date_start = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+    if forecast_mode:
+        date_start = today
+        date_end = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d")
+    else:
+        if not date_end:
+            date_end = today
+        if not date_start:
+            date_start = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
 
     cache_key = f"{west:.2f}_{south:.2f}_{east:.2f}_{north:.2f}_{date_start}_{date_end}_{gs}"
     if cache_key in _precip_cache and time.time() - _precip_cache[cache_key][0] < 600:
@@ -682,8 +706,20 @@ async def _fetch_precipitation_grid(
             lats.append(round(lat, 4))
             lons.append(round(lon, 4))
 
-    lat_str = ",".join(str(x) for x in lats)
-    lon_str = ",".join(str(x) for x in lons)
+    seen: dict[str, int] = {}
+    uniq_lats: list[float] = []
+    uniq_lons: list[float] = []
+    remap: list[int] = []
+    for i in range(len(lats)):
+        key = f"{lats[i]:.4f},{lons[i]:.4f}"
+        if key not in seen:
+            seen[key] = len(uniq_lats)
+            uniq_lats.append(lats[i])
+            uniq_lons.append(lons[i])
+        remap.append(seen[key])
+
+    lat_str = ",".join(str(x) for x in uniq_lats)
+    lon_str = ",".join(str(x) for x in uniq_lons)
 
     is_forecast = date_end >= today and date_start >= today
     if is_forecast:
@@ -711,17 +747,22 @@ async def _fetch_precipitation_grid(
         data_list = [raw]
 
     time_labels: list[str] = []
-    precip_matrix: list[list[float]] = []
+    uniq_vals: list[list[float]] = []
     for idx, pt in enumerate(data_list):
         hourly = pt.get("hourly", {})
         times = hourly.get("time", [])
         vals = hourly.get("precipitation", [])
         if not time_labels:
             time_labels = times
-        if len(precip_matrix) < len(vals):
-            precip_matrix = [[] for _ in range(len(vals))]
-        for t_idx, v in enumerate(vals):
-            precip_matrix[t_idx].append(float(v) if v is not None else 0.0)
+        uniq_vals.append([float(v) if v is not None else 0.0 for v in vals])
+
+    precip_matrix: list[list[float]] = []
+    for t_idx in range(len(time_labels)):
+        frame = []
+        for grid_idx in range(len(lats)):
+            uidx = remap[grid_idx]
+            frame.append(uniq_vals[uidx][t_idx] if t_idx < len(uniq_vals[uidx]) else 0.0)
+        precip_matrix.append(frame)
 
     if not time_labels or not precip_matrix:
         return {"error": "未获取到降水数据"}
@@ -747,6 +788,38 @@ async def _fetch_precipitation_grid(
     peak_idx = area_avg.index(max(area_avg)) if area_avg else 0
     peak_time = time_labels[peak_idx] if peak_idx < len(time_labels) else ""
 
+    storm_centers: list[dict] = []
+    for t_idx, frame in enumerate(precip_matrix):
+        if not frame or max(frame) <= 0:
+            continue
+        max_val_t = max(frame)
+        g_idx = frame.index(max_val_t)
+        sc_lat = grid_lats[g_idx] if g_idx < len(grid_lats) else 0
+        sc_lon = grid_lons[g_idx] if g_idx < len(grid_lons) else 0
+        storm_centers.append({
+            "time": time_labels[t_idx],
+            "lat": round(sc_lat, 4),
+            "lon": round(sc_lon, 4),
+            "mm": round(max_val_t, 2),
+            "place": "",
+        })
+
+    if storm_centers:
+        peak_sc = max(storm_centers, key=lambda s: s["mm"])
+        try:
+            async with httpx.AsyncClient(timeout=4) as gc:
+                resp = await gc.get(
+                    "https://nominatim.openstreetmap.org/reverse",
+                    params={"lat": peak_sc["lat"], "lon": peak_sc["lon"], "format": "json", "zoom": 14, "accept-language": "zh"},
+                    headers={"User-Agent": "S-AI/1.0"},
+                )
+                addr = resp.json().get("address", {})
+                parts = [addr.get("village"), addr.get("town"), addr.get("county")]
+                place = "·".join([p for p in parts if p]) or addr.get("county", "")
+                peak_sc["place"] = place
+        except Exception:
+            pass
+
     peak_grid_idx = precip_matrix[peak_idx].index(max(precip_matrix[peak_idx])) if precip_matrix[peak_idx] else 0
     peak_lat = grid_lats[peak_grid_idx] if peak_grid_idx < len(grid_lats) else 0
     peak_lon = grid_lons[peak_grid_idx] if peak_grid_idx < len(grid_lons) else 0
@@ -764,6 +837,7 @@ async def _fetch_precipitation_grid(
         "grid_lons": grid_lons,
         "precipitation_matrix": precip_matrix,
         "area_average_series": [{"time": t, "value_mm": v} for t, v in zip(time_labels, area_avg)],
+        "storm_centers": storm_centers,
         "stats": {
             "max_mm": round(max_val, 2),
             "mean_mm": round(mean_val, 2),
@@ -787,6 +861,14 @@ _CITY_COORDS = {
     "庆阳": (107.6380, 35.7342), "酒泉": (98.4941, 39.7320), "张掖": (100.4496, 38.9252),
     "武威": (102.6385, 37.9283), "白银": (104.1386, 36.5447), "嘉峪关": (98.2773, 39.7865),
     "金昌": (102.1880, 38.5160), "临夏": (103.2104, 35.6011), "甘南": (102.9109, 34.9834),
+    "赤峰": (118.8889, 42.2576), "呼和浩特": (111.7519, 40.8414), "沈阳": (123.4290, 41.7969),
+    "哈尔滨": (126.5358, 45.8023), "长春": (125.3245, 43.8868), "天津": (117.1901, 39.1252),
+    "郑州": (113.6253, 34.7466), "长沙": (112.9388, 28.2282), "南昌": (115.8581, 28.6829),
+    "合肥": (117.2272, 31.8206), "福州": (119.2964, 26.0745), "昆明": (102.8329, 24.8801),
+    "贵阳": (106.7135, 26.5783), "拉萨": (91.1409, 29.6457), "银川": (106.2309, 38.4872),
+    "西宁": (101.7782, 36.6171), "乌鲁木齐": (87.6168, 43.8256), "太原": (112.5489, 37.8706),
+    "石家庄": (114.5149, 38.0428), "济南": (117.1205, 36.6510), "海口": (110.3312, 20.0317),
+    "南宁": (108.3669, 22.8170), "包头": (109.8403, 40.6574),
 }
 
 
@@ -810,10 +892,9 @@ async def _geocode_city(name: str) -> tuple[float, float] | None:
 
 
 async def _extract_buildings(bbox=None, location=None):
-    import sys, os
+    import sys
     sys.path.insert(0, str(Path(__file__).parent))
-    from segment.tile_fetcher import fetch_tiles_for_bbox
-    from segment.engine import segment_buildings
+    from segment.osm_buildings import fetch_osm_buildings
 
     if not bbox or len(bbox) != 4 or not all(isinstance(v, (int, float)) for v in bbox):
         if location:
@@ -827,32 +908,81 @@ async def _extract_buildings(bbox=None, location=None):
             bbox = [105.725, 34.580, 105.745, 34.595]
     west, south, east, north = bbox
 
-    max_span = 0.015
+    max_span = 0.02
     cx, cy = (west + east) / 2, (south + north) / 2
     if abs(east - west) > max_span or abs(north - south) > max_span:
-        logger.info(f"[building_extract] bbox too large, clamping to {max_span}deg centered on ({cx:.4f},{cy:.4f})")
         west = cx - max_span / 2
         east = cx + max_span / 2
         south = cy - max_span / 2
         north = cy + max_span / 2
+    bbox = [west, south, east, north]
 
-    zoom = 18
+    logger.info(f"[building_extract] Querying OSM buildings bbox={bbox}")
+    try:
+        features = await fetch_osm_buildings(bbox)
+    except Exception as e:
+        logger.warning(f"[building_extract] OSM failed: {e}, falling back to SAM")
+        features = []
 
-    logger.info(f"[building_extract] Fetching tiles bbox={bbox} zoom={zoom}")
-    tile_data = await fetch_tiles_for_bbox(west, south, east, north, zoom=zoom)
-
-    img = tile_data["image"]
-    tile_bbox = tile_data["bbox"]
-
-    logger.info(f"[building_extract] Image {tile_data['width']}x{tile_data['height']}, running SAM...")
-    result = await asyncio.to_thread(segment_buildings, img, tile_bbox)
+    if len(features) < 3:
+        logger.info(f"[building_extract] OSM only {len(features)} buildings, falling back to SAM")
+        from segment.tile_fetcher import fetch_tiles_for_bbox
+        from segment.engine import segment_buildings
+        zoom = 18
+        tile_data = await fetch_tiles_for_bbox(west, south, east, north, zoom=zoom)
+        result = await asyncio.to_thread(segment_buildings, tile_data["image"], tile_data["bbox"])
+        result["data_source"] = "ArcGIS World Imagery + SAM vit_b (fallback)"
+        result["zoom"] = tile_data["zoom"]
+        result["n_tiles"] = tile_data["n_tiles"]
+    else:
+        avg_h = sum(f["properties"]["height_m"] for f in features) / len(features)
+        total_a = sum(f["properties"]["area_m2"] for f in features)
+        result = {
+            "buildings": features,
+            "count": len(features),
+            "avg_height_m": round(avg_h, 1),
+            "total_area_m2": round(total_a, 1),
+            "bbox": bbox,
+            "image_size": [0, 0],
+            "data_source": "OpenStreetMap (精确轮廓)",
+            "zoom": 18,
+            "n_tiles": 0,
+        }
 
     result["building_extract"] = True
-    result["data_source"] = "ArcGIS World Imagery + SAM vit_b"
-    result["zoom"] = tile_data["zoom"]
-    result["n_tiles"] = tile_data["n_tiles"]
+    logger.info(f"[building_extract] Done: {result['count']} buildings from {result.get('data_source','?')}")
+    return result
 
-    logger.info(f"[building_extract] Done: {result['count']} buildings extracted")
+
+async def _monitor_water(bbox=None, location=None):
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent))
+    from water_monitor.engine import search_scenes, extract_water
+
+    if not bbox or len(bbox) != 4 or not all(isinstance(v, (int, float)) for v in bbox):
+        if location:
+            coord = await _geocode_city(location)
+            if coord:
+                cx, cy = coord
+                half = 0.05
+                bbox = [cx - half, cy - half, cx + half, cy + half]
+                logger.info(f"[water_monitor] Geocoded '{location}' -> ({cx:.4f}, {cy:.4f})")
+        if not bbox:
+            bbox = [104.85, 33.15, 105.05, 33.35]
+
+    logger.info(f"[water_monitor] Searching Sentinel-2 scenes for bbox={bbox}")
+    scenes = await search_scenes(bbox, max_cloud=20, limit=30)
+    if not scenes:
+        return {"error": "未找到覆盖该区域的低云量Sentinel-2影像，请尝试其他日期范围或区域"}
+
+    logger.info(f"[water_monitor] Found {len(scenes)} scenes, best: {scenes[0]['date']} cloud={scenes[0]['cloud']:.1f}%")
+    result = await asyncio.to_thread(extract_water, bbox, scenes[0])
+    result["water_monitor"] = True
+    result["data_source"] = "Sentinel-2 L2A (10m)"
+    result["satellite"] = scenes[0]["scene_id"]
+    result["available_dates"] = [s["date"] for s in scenes[:5]]
+
+    logger.info(f"[water_monitor] Done: {result['water_body_count']} water bodies, {result['total_water_area_km2']}km2")
     return result
 
 
@@ -1420,8 +1550,9 @@ GLM_TOOLS.extend([
     {"type": "function", "function": {"name": "scatter_interpolate", "description": "散点插值/克里金插值：将离散数据点插值为连续网格表面。支持克里金(Kriging)、IDW反距离加权、RBF径向基函数、linear/nearest/cubic方法。输入散点坐标和值，输出插值网格统计数据。", "parameters": {"type": "object", "properties": {"points_json": {"type": "string", "description": "散点JSON数组: [{\"x\":104.9,\"y\":33.15,\"z\":1200}, ...]"}, "method": {"type": "string", "description": "插值方法: kriging(克里金), idw(反距离), rbf(径向基), linear, nearest, cubic", "default": "linear"}, "grid_resolution": {"type": "integer", "description": "网格分辨率(NxN)", "default": 100}}, "required": []}}},
     {"type": "function", "function": {"name": "auto_tool", "description": "【最终兜底工具】自动生成并执行Python代码完成计算任务。当你发现现有工具无法满足用户需求时，必须调用此工具。适用场景：数学计算、公式推导、水力计算、水文分析、拟合统计、生成GeoJSON、绘制图表、表格计算、矩阵运算。不要输出代码文本，调用此工具即可自动执行。", "parameters": {"type": "object", "properties": {"requirement": {"type": "string", "description": "用户的完整需求描述，包含所有输入参数和期望输出格式"}, "params_json": {"type": "string", "description": "输入参数JSON，如{\"b\":2,\"h\":1.5,\"n\":0.015}"}}, "required": ["requirement"]}}},
     {"type": "function", "function": {"name": "reconstruct_3d", "description": "AI三维重建：从单张照片生成3D模型(GLB格式)。基于TripoSR大模型，单张照片秒出3D网格。适用场景：水工建筑物三维重建、堤防外观重建、桥梁结构建模、设备3D数字化。当用户上传图片并要求3D重建/三维建模时调用此工具。", "parameters": {"type": "object", "properties": {"image_path": {"type": "string", "description": "上传图片的文件路径（从对话上下文中的[上传图片路径:xxx]获取）"}}, "required": ["image_path"]}}},
-    {"type": "function", "function": {"name": "precipitation_grid", "description": "气象网格降水分析：自动获取最近3天的公开气象降水数据(Open-Meteo)，生成区域逐小时降水网格动画热力图、面雨量过程线、暴雨中心定位。用户询问降水预报/降雨过程/降水分布/降雨网格/面雨量/暴雨分析时必须调用此工具，不要用weather_forecast。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north] 经纬度范围，如[104.5,33.0,105.3,33.5]", "items": {"type": "number"}, "default": [104.5, 33.0, 105.3, 33.5]}, "grid_size": {"type": "integer", "description": "网格密度(N×N)，默认8", "default": 8}}, "required": []}}},
+    {"type": "function", "function": {"name": "precipitation_grid", "description": "气象网格降水分析：自动获取最近3天的公开气象降水数据(Open-Meteo)，生成区域逐小时降水网格动画热力图、面雨量过程线、暴雨中心定位。用户询问降水预报/降雨过程/降水分布/降雨网格/面雨量/暴雨分析时必须调用此工具，不要用weather_forecast。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "grid_size": {"type": "integer", "description": "网格密度(N×N)，默认8", "default": 8}, "location": {"type": "string", "description": "城市或地点名称，如'赤峰'、'陇南'、'天水'。当用户提到城市名时填此项。"}}, "required": []}}},
     {"type": "function", "function": {"name": "building_extract", "description": "AI建筑提取与3D建模：自动下载目标区域高清卫星影像，利用SAM大模型分割所有建筑物轮廓，估算建筑高度，生成3D拉伸白模叠到地图上。输出GeoJSON建筑 footprint + 高度数据。当用户要求建筑识别/建筑提取/建筑物识别/房子识别/地物提取/卫星建筑/3D城市建模时调用。注意：需要选择城市/城镇区域，山区农田没有建筑。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "城市或地点名称，如'天水'、'兰州'、'西安'、'陇南'。当用户提到城市名时填此项。"}}, "required": []}}},
+    {"type": "function", "function": {"name": "water_monitor", "description": "遥感水体监测：自动下载Sentinel-2卫星影像(10m分辨率)，计算NDWI水体指数，提取河湖水库水体范围。输出GeoJSON水体多边形+面积统计+覆盖率。当用户要求水体监测/水体识别/河湖监测/水面面积/水体变化/水体提取/NDWI时调用。支持任意区域。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "地点名称，如'陇南'、'白龙江'、'天水'。"}}, "required": []}}},
 ])
 
 TOOL_TO_SERVER["weather_forecast"] = "internal"
@@ -1431,6 +1562,7 @@ TOOL_TO_SERVER["auto_tool"] = "internal"
 TOOL_TO_SERVER["reconstruct_3d"] = "internal"
 TOOL_TO_SERVER["precipitation_grid"] = "internal"
 TOOL_TO_SERVER["building_extract"] = "internal"
+TOOL_TO_SERVER["water_monitor"] = "internal"
 
 ROUTING_RULES.extend([
     (r"天气预报|降雨预报|气象预报|查天气", "weather_forecast"),
@@ -1440,6 +1572,7 @@ ROUTING_RULES.extend([
     (r"3D|三维|3d|重建|reconstruct|建模|立体", "reconstruct_3d"),
     (r"降水|降雨|雨量|面雨量|暴雨|precipitation|气象网格|降水监测|降水分析|降雨分析|降水分布|降雨分布|降水预报|降雨过程|降雨预报", "precipitation_grid"),
     (r"建筑识别|建筑提取|建筑物|建筑|房子识别|楼房|地物提取|卫星建筑|城市建模|建筑分割|building|建筑3D|建筑三维", "building_extract"),
+    (r"水体监测|水体识别|水体提取|河湖监测|水面面积|水体变化|NDWI|水体分析|遥感水体|水域监测|水库监测", "water_monitor"),
 ])
 
 
@@ -1557,12 +1690,17 @@ async def _handle_internal_tool(tool_name: str, args: dict, user_msg: str = "") 
             "message": f"3D重建完成: {meta.get('vertices', '?')}顶点, {meta.get('faces', '?')}面片, 耗时{meta.get('total_time', '?')}s",
         }
     if tool_name == "precipitation_grid":
+        fc = any(k in user_msg for k in ["预报", "未来", "预测", "forecast", "未来几天", "未来三天", "未来一周"])
         return await _fetch_precipitation_grid(
             bbox=args.get("bbox"),
             grid_size=args.get("grid_size", 8),
+            forecast_mode=fc,
+            location=args.get("location", ""),
         )
     if tool_name == "building_extract":
         return await _extract_buildings(args.get("bbox"), args.get("location"))
+    if tool_name == "water_monitor":
+        return await _monitor_water(args.get("bbox"), args.get("location"))
     return {"error": f"Unknown internal tool: {tool_name}"}
 
 
