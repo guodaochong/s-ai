@@ -1625,10 +1625,10 @@ ROUTING_RULES.extend([
     (r"知识图谱|相关实体|空间实体", "spatial_knowledge_query"),
     (r"散点插值|插值|griddata|IDW|克里金|Kriging|反距离|空间插值", "scatter_interpolate"),
     (r"3D|三维|3d|重建|reconstruct|建模|立体", "reconstruct_3d"),
-    (r"降水|降雨|雨量|面雨量|暴雨|precipitation|气象网格|降水监测|降水分析|降雨分析|降水分布|降雨分布|降水预报|降雨过程|降雨预报", "precipitation_grid"),
+    (r"洪水推演|淹没模拟|暴雨.*淹|城市内涝|3D洪水|洪水3D|内涝模拟|会不会淹|淹没3D|洪水动画|内涝|涨水", "flood_sim_3d"),
+    (r"降水|降雨|雨量|面雨量|暴雨分析|precipitation|气象网格|降水监测|降水分析|降雨分析|降水分布|降雨分布|降水预报|降雨过程|降雨预报", "precipitation_grid"),
     (r"建筑识别|建筑提取|建筑物|建筑|房子识别|楼房|地物提取|卫星建筑|城市建模|建筑分割|building|建筑3D|建筑三维", "building_extract"),
     (r"水体监测|水体识别|水体提取|河湖监测|水面面积|水体变化|NDWI|水体分析|遥感水体|水域监测|水库监测", "water_monitor"),
-    (r"洪水推演|淹没模拟|暴雨.*淹|城市内涝|3D洪水|洪水3D|内涝模拟|会不会淹|淹没3D|洪水动画", "flood_sim_3d"),
 ])
 
 

@@ -866,23 +866,76 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
       })
 
       const layers: any[] = []
+      const depthFrames: number[][][] = r.depth_frames || []
+      const gridLats: number[] = r.grid_lats || []
+      const gridLons: number[] = r.grid_lons || []
+      const gn = r.grid_n || 0
+      const gm = r.grid_m || 0
+
+      function depthColor(d: number): { fill: string; opacity: number } {
+        if (d < 0.05) return { fill: 'transparent', opacity: 0 }
+        if (d < 0.3) return { fill: '#60a5fa', opacity: 0.35 }
+        if (d < 0.8) return { fill: '#3b82f6', opacity: 0.5 }
+        if (d < 1.5) return { fill: '#2563eb', opacity: 0.6 }
+        if (d < 2.5) return { fill: '#1d4ed8', opacity: 0.7 }
+        return { fill: '#dc2626', opacity: 0.75 }
+      }
 
       function drawBuildingsAtStep(stepIdx: number) {
         layers.forEach((l: any) => map.removeLayer(l))
         layers.length = 0
+
+        if (depthFrames.length > stepIdx && gridLats.length > 0 && gridLons.length > 0) {
+          const frame = depthFrames[stepIdx]
+          const cellLat = gn > 1 ? Math.abs(gridLats[1] - gridLats[0]) : 0.001
+          const cellLon = gm > 1 ? Math.abs(gridLons[1] - gridLons[0]) : 0.001
+          const hLat = cellLat / 2
+          const hLon = cellLon / 2
+
+          const zoom = map.getZoom()
+          const showLabels = zoom >= 12
+
+          for (let ri = 0; ri < gn && ri < frame.length; ri++) {
+            for (let ci = 0; ci < gm && ci < frame[ri].length; ci++) {
+              const d = frame[ri][ci]
+              const dc = depthColor(d)
+              if (dc.opacity === 0) continue
+
+              const lat = gridLats[ri]
+              const lon = gridLons[ci]
+              const bounds = L.latLngBounds(
+                [lat - hLat, lon - hLon],
+                [lat + hLat, lon + hLon]
+              )
+              const rect = L.rectangle(bounds, {
+                fillColor: dc.fill, color: dc.fill, weight: 0.3,
+                fillOpacity: dc.opacity, opacity: 0.5,
+              })
+              if (showLabels && d >= 0.3) {
+                rect.bindTooltip(d.toFixed(1) + 'm', {
+                  permanent: true, className: 'precip-val', direction: 'center',
+                })
+              }
+              rect.addTo(map)
+              layers.push(rect)
+            }
+          }
+        }
+
         const sp = sps[stepIdx] || sps[sps.length - 1] || {}
-        const maxDepth = sp.max_depth_m || 0
+        const peakDepth = stats.peak_depth_m || sp.max_depth_m || 0
 
         impacts.forEach((b: any, idx: number) => {
           const coords = b.polygon
           if (!coords || coords.length < 3) return
           const latlngs = coords.map((c: number[]) => [c[1], c[0]] as [number, number])
-          const bd = b.max_flood_depth_m * (maxDepth > 0 ? maxDepth / (stats.peak_depth_m || maxDepth) : 1)
-          let color = '#4ade80', fop = 0.3
-          if (bd >= b.height_m) { color = '#ef4444'; fop = 0.65 }
-          else if (bd > 0.1) { color = '#f59e0b'; fop = 0.5 }
-          const poly = L.polygon(latlngs, { color, weight: 1.5, fillColor: color, fillOpacity: fop })
-          poly.bindPopup(`<div style="font-size:11px"><b>${b.building_type} #${idx+1}</b><br/>水深 ${bd > 0 ? bd.toFixed(1)+'m' : '无'}<br/>状态: ${b.flood_status === 'safe' ? '✅安全' : b.flood_status === 'partial' ? '⚠️部分' : '❌淹没'}</div>`)
+          const bd = b.max_flood_depth_m
+          let color = '#22c55e', fop = 0.6, weight = 2
+          if (b.flood_status === 'submerged') { color = '#ef4444'; fop = 0.7 }
+          else if (b.flood_status === 'partial') { color = '#f59e0b'; fop = 0.65 }
+          else { color = '#22c55e'; fop = 0.5 }
+          const poly = L.polygon(latlngs, { color, weight, fillColor: color, fillOpacity: fop })
+          poly.bindPopup(`<div style="font-size:11px"><b>${b.building_type} #${idx+1}</b><br/>地面${b.elevation_m}m / 建筑${b.height_m}m<br/>水深${b.max_flood_depth_m}m / ${b.flood_status === 'safe' ? '✅安全' : b.flood_status === 'partial' ? '⚠️部分' : '❌淹没'}</div>`)
           poly.addTo(map); layers.push(poly)
         })
         ;(map as any)._flood_layer = layers
