@@ -213,6 +213,9 @@ def _compress_result(tool: str, result: dict) -> str:
         return f"建筑提取: {result.get('count','?')}栋 平均高{result.get('avg_height_m','?')}m 总面积{result.get('total_area_m2','?')}m²"
     if tool == "water_monitor":
         return f"水体监测: {result.get('water_body_count','?')}处水体 水面{result.get('total_water_area_km2','?')}km² 覆盖率{result.get('water_coverage_pct','?')}% 日期{result.get('date','?')}"
+    if tool == "flood_sim_3d":
+        s = result.get("stats", {})
+        return f"洪水推演: 降雨{result.get('rainfall_mm','?')}mm 安全{s.get('safe','?')}栋/部分{s.get('partial','?')}栋/淹没{s.get('submerged','?')}栋"
     return json.dumps(result, ensure_ascii=False)[:200]
 
 
@@ -290,7 +293,7 @@ _route_cache: dict[str, str] = {}
 _ROUTE_CACHE_MAX = 200
 
 
-_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool,reconstruct_3d,precipitation_grid,building_extract,water_monitor".split(",")
+_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool,reconstruct_3d,precipitation_grid,building_extract,water_monitor,flood_sim_3d".split(",")
 
 _ROUTE_SYSTEM = """你是路由模块。只回复工具名或SIMPLE。
 
@@ -986,6 +989,56 @@ async def _monitor_water(bbox=None, location=None):
     return result
 
 
+async def _simulate_flood_3d(bbox=None, location=None, rainfall_mm=100):
+    import sys
+    import numpy as np
+    sys.path.insert(0, str(Path(__file__).parent))
+    from flood_sim.engine import fetch_elevation_grid, simulate_flood_2d
+    from segment.osm_buildings import fetch_osm_buildings
+
+    if not bbox or len(bbox) != 4 or not all(isinstance(v, (int, float)) for v in bbox):
+        if location:
+            coord = await _geocode_city(location)
+            if coord:
+                cx, cy = coord
+                half = 0.015
+                bbox = [cx - half, cy - half, cx + half, cy + half]
+        if not bbox:
+            bbox = [105.72, 34.57, 105.75, 34.60]
+
+    logger.info(f"[flood_sim_3d] bbox={bbox} rainfall={rainfall_mm}mm")
+
+    elev_data = await fetch_elevation_grid(bbox, grid_n=40)
+
+    try:
+        buildings = await fetch_osm_buildings(bbox)
+    except Exception:
+        buildings = []
+
+    for b in buildings:
+        b["_bbox_ref"] = bbox
+
+    result = simulate_flood_2d(
+        np.array(elev_data["grid"]),
+        buildings,
+        bbox,
+        rainfall_mm=float(rainfall_mm or 100),
+    )
+
+    result["flood_sim_3d"] = True
+    result["elevation_grid"] = elev_data["grid"]
+    result["grid_n"] = elev_data["grid_n"]
+    result["grid_lats"] = elev_data["lats"]
+    result["grid_lons"] = elev_data["lons"]
+    result["elev_range"] = [elev_data["min_elev"], elev_data["max_elev"]]
+    result["bbox"] = bbox
+    result["data_source"] = f"2D Hydrodynamic + {elev_data.get('source', 'DEM')}"
+    result["location"] = location or ""
+
+    logger.info(f"[flood_sim_3d] Done: {result['stats']['safe']}safe/{result['stats']['partial']}partial/{result['stats']['submerged']}submerged")
+    return result
+
+
 class DigitalTwinBridge:
     def __init__(self):
         self.sources: dict[str, dict] = {}
@@ -1553,6 +1606,7 @@ GLM_TOOLS.extend([
     {"type": "function", "function": {"name": "precipitation_grid", "description": "气象网格降水分析：自动获取最近3天的公开气象降水数据(Open-Meteo)，生成区域逐小时降水网格动画热力图、面雨量过程线、暴雨中心定位。用户询问降水预报/降雨过程/降水分布/降雨网格/面雨量/暴雨分析时必须调用此工具，不要用weather_forecast。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "grid_size": {"type": "integer", "description": "网格密度(N×N)，默认8", "default": 8}, "location": {"type": "string", "description": "城市或地点名称，如'赤峰'、'陇南'、'天水'。当用户提到城市名时填此项。"}}, "required": []}}},
     {"type": "function", "function": {"name": "building_extract", "description": "AI建筑提取与3D建模：自动下载目标区域高清卫星影像，利用SAM大模型分割所有建筑物轮廓，估算建筑高度，生成3D拉伸白模叠到地图上。输出GeoJSON建筑 footprint + 高度数据。当用户要求建筑识别/建筑提取/建筑物识别/房子识别/地物提取/卫星建筑/3D城市建模时调用。注意：需要选择城市/城镇区域，山区农田没有建筑。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "城市或地点名称，如'天水'、'兰州'、'西安'、'陇南'。当用户提到城市名时填此项。"}}, "required": []}}},
     {"type": "function", "function": {"name": "water_monitor", "description": "遥感水体监测：自动下载Sentinel-2卫星影像(10m分辨率)，计算NDWI水体指数，提取河湖水库水体范围。输出GeoJSON水体多边形+面积统计+覆盖率。当用户要求水体监测/水体识别/河湖监测/水面面积/水体变化/水体提取/NDWI时调用。支持任意区域。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "地点名称，如'陇南'、'白龙江'、'天水'。"}}, "required": []}}},
+    {"type": "function", "function": {"name": "flood_sim_3d", "description": "洪水淹没3D推演：自动获取地形高程+建筑轮廓，模拟降雨→径流→淹没过程，生成3D淹没动画(建筑逐栋被淹、水位上涨)。当用户要求洪水推演/淹没模拟/暴雨会不会淹/城市内涝模拟/3D洪水时调用。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "城市或地点名称，如'天水'、'陇南'。"}, "rainfall_mm": {"type": "number", "description": "降雨量(mm)，默认100", "default": 100}, "return_period": {"type": "string", "description": "重现期，如'50年一遇'、'100年一遇'，默认空"}}, "required": []}}},
 ])
 
 TOOL_TO_SERVER["weather_forecast"] = "internal"
@@ -1563,6 +1617,7 @@ TOOL_TO_SERVER["reconstruct_3d"] = "internal"
 TOOL_TO_SERVER["precipitation_grid"] = "internal"
 TOOL_TO_SERVER["building_extract"] = "internal"
 TOOL_TO_SERVER["water_monitor"] = "internal"
+TOOL_TO_SERVER["flood_sim_3d"] = "internal"
 
 ROUTING_RULES.extend([
     (r"天气预报|降雨预报|气象预报|查天气", "weather_forecast"),
@@ -1573,6 +1628,7 @@ ROUTING_RULES.extend([
     (r"降水|降雨|雨量|面雨量|暴雨|precipitation|气象网格|降水监测|降水分析|降雨分析|降水分布|降雨分布|降水预报|降雨过程|降雨预报", "precipitation_grid"),
     (r"建筑识别|建筑提取|建筑物|建筑|房子识别|楼房|地物提取|卫星建筑|城市建模|建筑分割|building|建筑3D|建筑三维", "building_extract"),
     (r"水体监测|水体识别|水体提取|河湖监测|水面面积|水体变化|NDWI|水体分析|遥感水体|水域监测|水库监测", "water_monitor"),
+    (r"洪水推演|淹没模拟|暴雨.*淹|城市内涝|3D洪水|洪水3D|内涝模拟|会不会淹|淹没3D|洪水动画", "flood_sim_3d"),
 ])
 
 
@@ -1701,6 +1757,8 @@ async def _handle_internal_tool(tool_name: str, args: dict, user_msg: str = "") 
         return await _extract_buildings(args.get("bbox"), args.get("location"))
     if tool_name == "water_monitor":
         return await _monitor_water(args.get("bbox"), args.get("location"))
+    if tool_name == "flood_sim_3d":
+        return await _simulate_flood_3d(args.get("bbox"), args.get("location"), args.get("rainfall_mm", 100))
     return {"error": f"Unknown internal tool: {tool_name}"}
 
 

@@ -795,6 +795,213 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
       </div>`
     return { html, mapActions: actions }
   },
+
+  flood_sim_3d(r, ms) {
+    if (!r.flood_sim_3d) return { html: '', mapActions: [] }
+
+    const actions: (() => void)[] = []
+    const impacts = r.building_impacts || []
+    const stats = r.stats || {}
+    const sps = r.stats_per_step || []
+    const discharge = r.discharge_cms || []
+    const bbox = r.bbox || []
+    const peakQ = r.peak_discharge_cms || 0
+    const peakQt = r.peak_discharge_time || ''
+    const cnMean = r.cn_grid_mean || '?'
+    const cnRange = r.cn_grid_range || [0, 0]
+    const ttMax = r.travel_time_max_min || 0
+    const ttMean = r.travel_time_mean_min || 0
+    const streamCells = r.stream_network_cells || 0
+    const streamNodes = r.stream_nodes || 0
+
+    const hydrograph = (() => {
+      if (!discharge.length) return ''
+      const maxQ = Math.max(...discharge, 1)
+      const w = 380, h = 100, pad = 30
+      const pts = discharge.map((q: number, i: number) => {
+        const x = pad + i / (discharge.length - 1) * (w - pad - 10)
+        const y = h - 10 - (q / maxQ) * (h - 20)
+        return `${x.toFixed(1)},${y.toFixed(1)}`
+      }).join(' ')
+      const fillPts = `${pad},${h-10} ${pts} ${w-10},${h-10}`
+      return `<svg viewBox="0 0 ${w} ${h+15}" class="tr-chart">
+        <text x="${pad}" y="12" fill="#94a3b8" font-size="9">Q(m³/s)</text>
+        <text x="${w-30}" y="${h+12}" fill="#94a3b8" font-size="9">时间(h)</text>
+        <line x1="${pad}" y1="${h-10}" x2="${w-10}" y2="${h-10}" stroke="#334155" stroke-width="0.5"/>
+        <line x1="${pad}" y1="15" x2="${pad}" y2="${h-10}" stroke="#334155" stroke-width="0.5"/>
+        <polygon points="${fillPts}" fill="rgba(0,180,255,0.1)"/>
+        <polyline points="${pts}" fill="none" stroke="#00b4ff" stroke-width="1.5"/>
+        <text x="${w/2}" y="${h+12}" fill="#00b4ff" font-size="9" text-anchor="middle">峰值 ${peakQ} m³/s @ ${peakQt}</text>
+      </svg>`
+    })()
+
+    actions.push(() => {
+      const map = ms.getMap()
+      if (!map) return
+
+      ;(map as any)._flood_layer?.forEach((l: any) => map.removeLayer(l))
+      if ((map as any)._sat_layer) {
+        map.removeLayer((map as any)._sat_layer)
+        map.eachLayer((layer: any) => {
+          if (layer instanceof L.TileLayer) layer.setOpacity(layer._orig_opacity ?? 1)
+        })
+        ;(map as any)._sat_layer = null
+      }
+      const container = map.getContainer()
+      const panel = container.closest('.map-panel') || container.parentElement
+      ;(panel as any)?.querySelector?.('#flood-stats-panel')?.remove?.()
+      ;(panel as any)?.querySelector?.('#flood-timeline')?.remove?.()
+      if ((map as any)._flood_timer) clearInterval((map as any)._flood_timer)
+
+      const satLayer = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 19, className: 'sat-base-layer' }
+      )
+      satLayer.addTo(map); satLayer.bringToBack()
+      ;(map as any)._sat_layer = satLayer
+      map.eachLayer((layer: any) => {
+        if (layer instanceof L.TileLayer && layer !== satLayer) {
+          layer._orig_opacity = layer.options.opacity ?? 1; layer.setOpacity(0)
+        }
+      })
+
+      const layers: any[] = []
+
+      function drawBuildingsAtStep(stepIdx: number) {
+        layers.forEach((l: any) => map.removeLayer(l))
+        layers.length = 0
+        const sp = sps[stepIdx] || sps[sps.length - 1] || {}
+        const maxDepth = sp.max_depth_m || 0
+
+        impacts.forEach((b: any, idx: number) => {
+          const coords = b.polygon
+          if (!coords || coords.length < 3) return
+          const latlngs = coords.map((c: number[]) => [c[1], c[0]] as [number, number])
+          const bd = b.max_flood_depth_m * (maxDepth > 0 ? maxDepth / (stats.peak_depth_m || maxDepth) : 1)
+          let color = '#4ade80', fop = 0.3
+          if (bd >= b.height_m) { color = '#ef4444'; fop = 0.65 }
+          else if (bd > 0.1) { color = '#f59e0b'; fop = 0.5 }
+          const poly = L.polygon(latlngs, { color, weight: 1.5, fillColor: color, fillOpacity: fop })
+          poly.bindPopup(`<div style="font-size:11px"><b>${b.building_type} #${idx+1}</b><br/>水深 ${bd > 0 ? bd.toFixed(1)+'m' : '无'}<br/>状态: ${b.flood_status === 'safe' ? '✅安全' : b.flood_status === 'partial' ? '⚠️部分' : '❌淹没'}</div>`)
+          poly.addTo(map); layers.push(poly)
+        })
+        ;(map as any)._flood_layer = layers
+      }
+
+      drawBuildingsAtStep(sps.length - 1)
+
+      if (bbox && bbox.length === 4) {
+        map.fitBounds([[bbox[1], bbox[0]], [bbox[3], bbox[2]]], { padding: [50, 50] })
+      }
+
+      _injectBuildingCss()
+      if (panel) {
+        const safe = stats.safe || 0
+        const partial = stats.partial || 0
+        const submerged = stats.submerged || 0
+        const total = stats.total_buildings || 0
+        const statsDiv = document.createElement('div')
+        statsDiv.id = 'flood-stats-panel'
+        statsDiv.className = 'building-stats-panel'
+        statsDiv.innerHTML = `
+          <div class="bsp-header" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.15)">
+            <span class="bsp-icon">🌊</span>
+            <span class="bsp-title" style="color:#ef4444">分布式水文×二维水动力</span>
+            <button class="bsp-close" onclick="this.parentElement.parentElement.remove()">✕</button>
+          </div>
+          <div class="bsp-body">
+            <div class="bsp-stat"><div class="bsp-val" style="color:#00b4ff;font-size:18px">${peakQ}</div><div class="bsp-lbl">峰值流量m³/s</div></div>
+            <div class="bsp-stat"><div class="bsp-val" style="color:#ef4444;font-size:18px">${stats.peak_depth_m || 0}m</div><div class="bsp-lbl">峰值水深</div></div>
+            <div class="bsp-stat"><div class="bsp-val" style="color:#f59e0b;font-size:18px">${(stats.max_flooded_area_pct || 0).toFixed(0)}%</div><div class="bsp-lbl">淹没面积</div></div>
+          </div>
+          <div class="bsp-source" style="border-color:rgba(239,68,68,0.06)">
+            📡 ${r.data_source || ''}<br/>
+            🏔️ DEM ${r.grid_n||'?'}×${r.grid_m||'?'} ${r.resolution_m||'?'}m/px<br/>
+            🌧️ 降雨${r.rainfall_mm||'?'}mm → 径流${r.runoff_mm||'?'}mm<br/>
+            📊 CN=${cnMean} (${cnRange[0]}-${cnRange[1]}) Manning n=${r.manning_n||'?'}<br/>
+            🏞️ 河网${streamCells}格/${streamNodes}节点 行进${ttMean}-${ttMax}min<br/>
+            🏗️ ${total}栋: ✅${safe} / ⚠️${partial} / ❌${submerged}
+          </div>
+          <div class="bsp-legend">
+            <div class="bsp-lg-title">建筑淹没状态</div>
+            <div class="bsp-lg-items">
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#4ade80"></span>✅ 安全</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#f59e0b"></span>⚠️ 部分淹没</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#ef4444"></span>❌ 完全淹没</div>
+            </div>
+          </div>
+        `
+        panel.appendChild(statsDiv)
+
+        if (sps.length > 1) {
+          const tl = document.createElement('div')
+          tl.id = 'flood-timeline'
+          tl.className = 'precip-timeline'
+          let curStep = sps.length - 1
+          let playing = true
+          tl.innerHTML = `
+            <div class="ptl-bar">
+              <button id="fl-prev" class="ptl-btn">⏮</button>
+              <button id="fl-play" class="ptl-btn ptl-play">⏸</button>
+              <button id="fl-next" class="ptl-btn">⏭</button>
+              <span id="fl-info" class="ptl-time">--</span>
+              <input id="fl-slider" type="range" min="0" max="${sps.length - 1}" value="${sps.length - 1}" class="ptl-slider" />
+            </div>
+          `
+          panel.appendChild(tl)
+
+          function updateTL(step: number) {
+            const sp = sps[step] || {}
+            const info = tl.querySelector('#fl-info')
+            const slider = tl.querySelector('#fl-slider') as HTMLInputElement
+            if (info) {
+              const t = sp.time_h || 0
+              const d = sp.max_depth_m || 0
+              const fp = sp.flooded_pct || 0
+              const q = sp.discharge_cms || 0
+              info.textContent = `${t}h | 水深${d}m | 淹${fp}% | Q=${q}m³/s`
+            }
+            if (slider) slider.value = String(step)
+            drawBuildingsAtStep(step)
+          }
+
+          tl.querySelector('#fl-prev')?.addEventListener('click', () => { curStep = Math.max(0, curStep-1); updateTL(curStep) })
+          tl.querySelector('#fl-next')?.addEventListener('click', () => { curStep = Math.min(sps.length-1, curStep+1); updateTL(curStep) })
+          const playBtn = tl.querySelector('#fl-play')
+          playBtn?.addEventListener('click', () => { playing = !playing; if (playBtn) playBtn.textContent = playing ? '⏸' : '▶' })
+          tl.querySelector('#fl-slider')?.addEventListener('input', (e: any) => { curStep = parseInt(e.target.value); playing = false; if (playBtn) playBtn.textContent = '▶'; updateTL(curStep) })
+
+          ;(map as any)._flood_timer = setInterval(() => {
+            if (!playing) return
+            curStep = (curStep + 1) % sps.length
+            updateTL(curStep)
+          }, 800)
+        }
+      }
+    })
+
+    const safe = stats.safe || 0
+    const partial = stats.partial || 0
+    const submerged = stats.submerged || 0
+    const html = `
+      <div class="tr-recon-card">
+        <div class="tr-recon-header" style="color:#ef4444">🌊 分布式水文×二维水动力推演</div>
+        <div style="font-size:10px;color:#64748b;margin-bottom:8px">
+          ${r.data_source || ''} | ${r.grid_n||'?'}×${r.grid_m||'?'} ${r.resolution_m||'?'}m/px
+        </div>
+        <div class="tr-recon-stats">
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#00b4ff">${peakQ}</span><span class="tr-recon-lbl">峰值Q(m³/s)</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#ef4444">${stats.peak_depth_m || 0}m</span><span class="tr-recon-lbl">峰值水深</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#f59e0b">${(stats.max_flooded_area_pct||0).toFixed(0)}%</span><span class="tr-recon-lbl">淹没面积</span></div>
+        </div>
+        <div style="font-size:10px;color:#94a3b8;margin:6px 0">
+          🌧️${r.rainfall_mm||'?'}mm→径流${r.runoff_mm||'?'}mm | CN=${cnMean} | 河网${streamCells}格 | 行进${ttMean}-${ttMax}min
+        </div>
+        ${hydrograph}
+        <div class="tr-sub" style="margin-top:4px">🏗️ ${safe}✅ / ${partial}⚠️ / ${submerged}❌ | 📍动画+流量过程线已加载</div>
+      </div>`
+    return { html, mapActions: actions }
+  },
 }
 
 /* ── Generic renderer (fallback) ── */
