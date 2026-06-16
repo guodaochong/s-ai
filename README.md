@@ -37,6 +37,18 @@
 
 "这个区域如果发生百年一遇暴雨，哪里会被淹？"
   → 设计暴雨生成 → SCS-CN径流 → 洪水淹没 → 风险分区 → 3D水动力模拟
+
+"展示赤峰未来三天降雨预报过程"
+  → precipitation_grid → Open-Meteo ERA5-Land 9km网格 → 动画热力图 + 移动暴雨中心 + 面雨量过程线
+
+"识别天水市中心的建筑"
+  → building_extract → OpenStreetMap精确轮廓 + 类型分类(住宅/商业/工业) + 卫星影像叠加
+
+"水体监测陇南"
+  → water_monitor → Sentinel-2 L2A 卫星下载 → NDWI水体提取 → 多边形 + 面积统计
+
+"帮我重建这个水工建筑物的3D模型"
+  → reconstruct_3d → 上传照片 → TripoSR AI重建 → Three.js GLB查看器
 ```
 
 ---
@@ -177,7 +189,7 @@ Step 3/8: 💭 综合分析完成
           ✅ 推理完成，共3步，调用2个工具
 ```
 
-每步可选 36 个工具中的任意组合，自动串联上下文（前一步的输出可作为下一步的输入）。
+每步可选 40+ 个工具中的任意组合，自动串联上下文（前一步的输出可作为下一步的输入）。
 
 ### 3. 辩论验证 (Debate Validation)
 
@@ -268,7 +280,7 @@ LLM 生成 Python 代码 → 沙箱执行
 | **通信** | EventSource (SSE) | 12 种事件类型实时推送 |
 | **编排** | WorkflowEditor (DAG) | 拖拽画布、SVG Bezier 连线、模板系统 |
 
-### 18+ 工具渲染策略
+### 22+ 工具渲染策略
 
 每种工具类型拥有独立渲染函数，返回 `{ html, mapActions[] }`：
 
@@ -283,7 +295,10 @@ LLM 生成 Python 代码 → 沙箱执行
 | `swmm_simulate` | SWMM 时间序列曲线 |
 | `hydrodynamic_2d_sim` | Three.js 3D 水动力自动播放 |
 | `scatter_interpolate` | 插值热力图 image overlay |
-| `hydrodynamic_2d_sim` | TIN mesh + GLSL 波浪动画 |
+| `precipitation_grid` | **动画网格热力图 + 时间轴播放器 + 移动暴雨中心 + 面雨量过程线** |
+| `reconstruct_3d` | **TripoSR GLB 3D查看器 + 下载按钮** |
+| `building_extract` | **OSM建筑轮廓 + 类型色阶 + 卫星影像叠加 + 统计面板** |
+| `water_monitor` | **NDWI水体多边形 + 面积统计面板** |
 | Generic fallback | 表格 / 代码块 / JSON / SVG 图表 |
 
 ### SSE 事件流 (12 种类型)
@@ -305,7 +320,17 @@ done            → 推理完成
 
 ---
 
-## ◆ 能力矩阵 · 36 工具
+## ◆ 能力矩阵 · 40+ 工具
+
+### 🤖 AI 视觉与遥感 (5 tools)
+
+| 工具 | 说明 |
+|------|------|
+| `reconstruct_3d` | **AI三维重建** — 单张照片→3D网格 (TripoSR, ~2.3GB VRAM, <1s推理) |
+| `building_extract` | **建筑识别** — OSM精确轮廓优先 + SAM分割补充, 6类分类(住宅/商业/工业/公共/附属) |
+| `water_monitor` | **遥感水体监测** — Sentinel-2 L2A 10m, NDWI水体提取, 免费无需API Key |
+| `precipitation_grid` | **气象降水网格** — ERA5-Land 9km逐小时, 动画热力图+移动暴雨中心+逆地理编码 |
+| `weather_forecast` | 气象预报 (温度/风速/湿度, Open-Meteo) |
 
 ### 🗺️ GIS 空间分析 (8 tools)
 
@@ -380,6 +405,58 @@ WorkflowEditor 提供可视化 DAG 编排能力：
 
 ---
 
+## ◆ AI 视觉与遥感能力
+
+### 🏗️ AI 三维重建 (TripoSR)
+
+单张照片秒出3D网格模型，适用于水工建筑物、堤防、桥梁的3D数字化：
+
+```
+用户上传照片 → [img:dam.jpg]
+  → TripoSR 2.3GB VRAM, ~1s 推理
+  → GLB 网格导出 → Three.js 查看器
+  → 可旋转/缩放/下载
+```
+
+### 🏙️ 建筑识别 (OSM + SAM)
+
+双数据源建筑提取，优先使用OpenStreetMap精确轮廓：
+
+| 数据源 | 准确率 | 速度 | 特点 |
+|--------|--------|------|------|
+| **OSM (优先)** | ~95%+ | ~8s | 精确轮廓 + 类型标签 + 楼层 |
+| **SAM (补充)** | ~60% | ~70s | 卫星影像AI分割，OSM覆盖不足时使用 |
+
+6类建筑分类：🏠 低层住宅 · 🏢 高层住宅 · 🏬 商业办公 · 🏭 工业仓储 · 🏫 公共设施 · 🔧 附属设施
+
+### 🌊 遥感水体监测 (Sentinel-2)
+
+自动下载Sentinel-2 L2A卫星影像（10m分辨率），计算NDWI提取水体：
+
+```
+STAC API搜索 → 云量过滤 → 覆盖检查
+  → rasterio COG窗口读取 (B3 Green + B8 NIR)
+  → NDWI = (Green - NIR) / (Green + NIR)
+  → 形态学去噪 → 多边形提取 → GeoJSON输出
+```
+
+- **免费** — element84 STAC API + AWS S3公开数据，无需API Key
+- **精确** — 10m分辨率，可识别小至50m²的水体
+- **时序** — 支持多日期对比，监测河湖水库面积变化
+
+### 🌧️ 气象降水网格 (ERA5-Land 9km)
+
+逐小时降水网格动画，6级气象色阶，暴雨中心随时间轴移动：
+
+```
+Open-Meteo ERA5-Land API (0.1° ~9km)
+  → N×N网格采样 → 坐标去重 → 面雨量过程线
+  → Leaflet矩形热力图 → 时间轴播放器 (▶⏸⏮⏭)
+  → 暴雨中心红点跟随移动 + Nominatim逆地理编码显示乡镇名
+```
+
+---
+
 ## ◆ 水动力 3D 可视化
 
 2D 水动力模拟结果通过自定义 GLSL Shader 在 Three.js 中实时渲染：
@@ -416,7 +493,8 @@ export ZHIPUAI_API_KEY=your_key_here       # Linux/Mac
 
 # 2. Python 依赖
 pip install fastapi uvicorn httpx zhipuai rasterio geopandas shapely \
-            numpy scipy fiona pyswmm structlog python-dotenv
+            numpy scipy fiona pyswmm structlog python-dotenv \
+            segment-anything torch torchvision pillow opencv-python pyproj
 
 # 3. 启动后端 (7 MCP + Web Server)
 python web/server.py
@@ -442,21 +520,32 @@ cd web/frontend && npm run build    # → dist/ (~836KB JS, 236KB gzip)
 ```
 S-AI/
 ├── web/
-│   ├── server.py                    # 后端主服务 (1940行)
+│   ├── server.py                    # 后端主服务 (2400+行)
 │   │   ├── 三层路由 (L1/L2/L3)      │   ├── 辩论验证 (3角色)
 │   │   ├── ReAct 推理 (8步)         │   ├── 思维树 (ToT)
 │   │   ├── 自动工具生成 + 自修复     │   ├── 熔断器 + LRU缓存
-│   │   ├── 全链路追踪               │   ├── 自进化路由学习
-│   │   ├── 智能体记忆 (SQLite)      │   ├── 数字孪生桥梁
+│   │   ├── 全链路追踪               │   ├── 城市地理编码 (46城+Nominatim)
 │   │   ├── 常识注入 + 物理校验      │   ├── 图片理解 (GLM-4V)
 │   │   └── 对话持久化 + 文件上传
+│   │
+│   ├── reconstruct/                 # AI 3D重建模块
+│   │   └── engine.py                # TripoSR引擎 (lazy load, GLB export)
+│   │
+│   ├── segment/                     # AI 建筑提取模块
+│   │   ├── engine.py                # SAM vit_b 分割 + 建筑分类
+│   │   ├── osm_buildings.py         # OSM Overpass API精确轮廓
+│   │   └── tile_fetcher.py          # ArcGIS World Imagery 瓦片下载
+│   │
+│   ├── water_monitor/               # 遥感水体监测模块
+│   │   └── engine.py                # Sentinel-2 STAC搜索 + NDWI提取
 │   │
 │   ├── index.html                   # 原版前端 (2596行, 参考)
 │   └── frontend/                    # Vue 3 前端
 │       ├── vite.config.ts
 │       └── src/
-│           ├── App.vue              # 三栏 + 事件流 + Workflow
-│           ├── components/          # TopBar SideBar MapPanel ChatPanel WorkflowEditor
+│           ├── App.vue              # 三栏布局 260px|1fr|460px
+│           ├── components/          # TopBar SideBar MapPanel ChatPanel
+│           │                        # ReconstructionPanel WorkflowEditor
 │           ├── stores/              # chat.ts map.ts three.ts
 │           ├── composables/         # useSSE useToolRenderer useServices
 │           ├── types/               # SSEEvent ChatMessage ToolResult MapLayerInfo
