@@ -1055,6 +1055,192 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
       </div>`
     return { html, mapActions: actions }
   },
+
+  drone_mission(r, ms) {
+    if (!r.drone_mission) return { html: '', mapActions: [] }
+
+    const actions: (() => void)[] = []
+    const waypoints = r.waypoints || []
+    const bbox = r.bbox || []
+    const fs = r.flood_summary || {}
+
+    actions.push(() => {
+      const map = ms.getMap()
+      if (!map) return
+
+      ;(map as any)._drone_layer?.forEach((l: any) => map.removeLayer(l))
+      if ((map as any)._drone_timer) clearInterval((map as any)._drone_timer)
+      const container = map.getContainer()
+      const panel = container.closest('.map-panel') || container.parentElement
+      ;(panel as any)?.querySelector?.('#drone-stats-panel')?.remove?.()
+      ;(panel as any)?.querySelector?.('#drone-timeline')?.remove?.()
+
+      const satLayer = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 19, className: 'sat-base-layer' }
+      )
+      satLayer.addTo(map); satLayer.bringToBack()
+      ;(map as any)._sat_layer = satLayer
+      map.eachLayer((layer: any) => {
+        if (layer instanceof L.TileLayer && layer !== satLayer) {
+          layer._orig_opacity = layer.options.opacity ?? 1; layer.setOpacity(0)
+        }
+      })
+
+      const layers: any[] = []
+
+      const flightPath = waypoints.filter((w: any) => w.action !== 'takeoff' || w.seq === 0)
+      const pathLatLngs = waypoints.map((w: any) => [w.lat, w.lon] as [number, number])
+
+      const polyline = L.polyline(pathLatLngs, {
+        color: '#00d4ff', weight: 2, opacity: 0.6, dashArray: '8 6',
+      })
+      polyline.addTo(map); layers.push(polyline)
+
+      waypoints.forEach((w: any) => {
+        let icon = '📍', color = '#00d4ff'
+        if (w.action === 'takeoff') { icon = '🛫'; color = '#4ade80' }
+        else if (w.action === 'land') { icon = '🛬'; color = '#ef4444' }
+        else if (w.risk_score > 5) { icon = '⚠️'; color = '#f59e0b' }
+        else if (w.risk_score > 0) { icon = '🎯'; color = '#00d4ff' }
+
+        const marker = L.circleMarker([w.lat, w.lon], {
+          radius: w.action === 'takeoff' || w.action === 'land' ? 8 : 6,
+          fillColor: color, color: '#fff', weight: 2, fillOpacity: 0.9,
+        })
+        const riskText = w.risk_score > 0 ? `风险${w.risk_score}` : ''
+        const typeText = w.type === 'building_cluster' ? '建筑淹没区' : w.type === 'deep_water' ? '深水区' : ''
+        marker.bindPopup(
+          `<div style="font-size:11px;line-height:1.5">
+             <b style="color:${color}">${icon} ${w.label}</b><br/>
+             ${w.action === 'takeoff' ? '🛫 起飞' : w.action === 'land' ? '🛬 降落' : `高度${w.alt_m}m / 速度${w.speed_ms}m/s`}<br/>
+             ${riskText ? `⚠️ ${riskText}<br/>` : ''}${typeText ? `📋 ${typeText}<br/>` : ''}
+             📍 ${w.lat.toFixed(4)}, ${w.lon.toFixed(4)}
+           </div>`
+        )
+        marker.addTo(map); layers.push(marker)
+      })
+
+      const droneIcon = L.divIcon({
+        html: `<div style="font-size:24px;text-align:center;filter:drop-shadow(0 0 6px #00d4ff)">🚁</div>`,
+        iconSize: [30, 30], iconAnchor: [15, 15],
+      })
+      const droneMarker = L.marker([waypoints[0].lat, waypoints[0].lon], { icon: droneIcon })
+      droneMarker.addTo(map); layers.push(droneMarker)
+
+      const trail: [number, number][] = []
+      const trailLine = L.polyline(trail, { color: '#00d4ff', weight: 3, opacity: 0.8 })
+      trailLine.addTo(map); layers.push(trailLine)
+
+      ;(map as any)._drone_layer = layers
+
+      if (bbox.length === 4) {
+        map.fitBounds([[bbox[1], bbox[0]], [bbox[3], bbox[2]]], { padding: [50, 50] })
+      }
+
+      _injectBuildingCss()
+      if (panel) {
+        const statsDiv = document.createElement('div')
+        statsDiv.id = 'drone-stats-panel'
+        statsDiv.className = 'building-stats-panel'
+        const batOk = r.battery_sufficient ? '✅' : '⚠️'
+        statsDiv.innerHTML = `
+          <div class="bsp-header" style="background:rgba(0,212,255,0.08);border-color:rgba(0,212,255,0.15)">
+            <span class="bsp-icon">🚁</span>
+            <span class="bsp-title" style="color:#00d4ff">${r.mission_name || '无人机航线'}</span>
+            <button class="bsp-close" onclick="this.parentElement.parentElement.remove()">✕</button>
+          </div>
+          <div class="bsp-body">
+            <div class="bsp-stat"><div class="bsp-val" style="color:#00d4ff;font-size:18px">${r.n_waypoints || 0}</div><div class="bsp-lbl">航点数</div></div>
+            <div class="bsp-stat"><div class="bsp-val" style="color:#f59e0b;font-size:18px">${r.total_distance_km || 0}km</div><div class="bsp-lbl">航程</div></div>
+            <div class="bsp-stat"><div class="bsp-val" style="color:#4ade80;font-size:18px">${r.estimated_flight_min || 0}min</div><div class="bsp-lbl">飞行时间</div></div>
+          </div>
+          <div class="bsp-source" style="border-color:rgba(0,212,255,0.06)">
+            🚁 高度${r.altitude_m || '?'}m / 速度${r.speed_ms || '?'}m/s<br/>
+            🔋 需${r.battery_required_min || '?'}min ${batOk}<br/>
+            ${fs ? `🌊 水深${fs.peak_depth_m || 0}m / ${fs.buildings_at_risk || 0}栋受威胁` : '📋 常规巡查'}
+          </div>
+          <div class="bsp-toggle-row">
+            <button class="bsp-toggle-btn" id="dm-playback">▶ 播放飞行</button>
+            <button class="bsp-toggle-btn" id="dm-kml" style="margin-top:4px">⬇ 下载KML</button>
+          </div>
+          <div class="bsp-legend">
+            <div class="bsp-lg-title">航点类型</div>
+            <div class="bsp-lg-items">
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#4ade80"></span>🛫 起降点</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#00d4ff"></span>🎯 巡查航点</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#f59e0b"></span>⚠️ 高风险区</div>
+            </div>
+          </div>
+        `
+        panel.appendChild(statsDiv)
+
+        const kmlBtn = statsDiv.querySelector('#dm-kml')
+        if (kmlBtn && r.kml) {
+          kmlBtn.addEventListener('click', () => {
+            const blob = new Blob([r.kml], { type: 'application/vnd.google-earth.kml+xml' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url; a.download = `drone_mission_${r.mission_type || 'plan'}.kml`
+            a.click(); URL.revokeObjectURL(url)
+          })
+        }
+
+        const playBtn = statsDiv.querySelector('#dm-playback')
+        if (playBtn) {
+          let playing = false
+          let wpIdx = 0
+          let segProgress = 0
+          playBtn.addEventListener('click', () => {
+            playing = !playing
+            playBtn.textContent = playing ? '⏸ 暂停' : '▶ 播放飞行'
+            if (playing && (map as any)._drone_timer) clearInterval((map as any)._drone_timer)
+
+            if (playing) {
+              (map as any)._drone_timer = setInterval(() => {
+                if (wpIdx >= waypoints.length - 1) {
+                  wpIdx = 0; segProgress = 0; trail.length = 0; trailLine.setLatLngs([])
+                }
+                const from = waypoints[wpIdx]
+                const to = waypoints[Math.min(wpIdx + 1, waypoints.length - 1)]
+                segProgress += 0.05
+                if (segProgress >= 1) {
+                  segProgress = 0
+                  wpIdx++
+                  trail.push([from.lat, from.lon])
+                  trailLine.setLatLngs(trail)
+                }
+                const lat = from.lat + (to.lat - from.lat) * segProgress
+                const lon = from.lon + (to.lon - from.lon) * segProgress
+                droneMarker.setLatLng([lat, lon])
+              }, 50)
+            } else {
+              if ((map as any)._drone_timer) clearInterval((map as any)._drone_timer)
+            }
+          })
+        }
+      }
+    })
+
+    const batOk = r.battery_sufficient ? '✅' : '⚠️'
+    const fsInfo = r.flood_summary
+    const html = `
+      <div class="tr-recon-card">
+        <div class="tr-recon-header" style="color:#00d4ff">🚁 ${r.mission_name || '无人机航线规划完成'}</div>
+        <div style="font-size:10px;color:#64748b;margin-bottom:8px">
+          ${r.mission_type || ''} | 高度${r.altitude_m || '?'}m | 速度${r.speed_ms || '?'}m/s
+        </div>
+        <div class="tr-recon-stats">
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#00d4ff">${r.n_waypoints || 0}</span><span class="tr-recon-lbl">航点</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#f59e0b">${r.total_distance_km || 0}km</span><span class="tr-recon-lbl">航程</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#4ade80">${r.estimated_flight_min || 0}min</span><span class="tr-recon-lbl">飞行 ${batOk}</span></div>
+        </div>
+        ${fsInfo ? `<div class="tr-sub" style="margin-top:4px">🌊 基于洪水推演: 水深${fsInfo.peak_depth_m || 0}m, ${fsInfo.buildings_at_risk || 0}栋建筑受威胁</div>` : ''}
+        <div class="tr-sub" style="margin-top:2px">📍 ${r.n_waypoints || 0}个航点已渲染到地图，点击▶播放飞行动画</div>
+        <div class="tr-sub" style="margin-top:2px;color:#00d4ff">⬇ 可导出KML文件导入DJI Pilot执行</div>
+      </div>`
+    return { html, mapActions: actions }
+  },
 }
 
 /* ── Generic renderer (fallback) ── */

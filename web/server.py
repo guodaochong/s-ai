@@ -216,6 +216,8 @@ def _compress_result(tool: str, result: dict) -> str:
     if tool == "flood_sim_3d":
         s = result.get("stats", {})
         return f"洪水推演: 降雨{result.get('rainfall_mm','?')}mm 安全{s.get('safe','?')}栋/部分{s.get('partial','?')}栋/淹没{s.get('submerged','?')}栋"
+    if tool == "drone_mission":
+        return f"无人机航线: {result.get('n_waypoints','?')}航点 {result.get('total_distance_km','?')}km {result.get('estimated_flight_min','?')}min"
     return json.dumps(result, ensure_ascii=False)[:200]
 
 
@@ -293,7 +295,7 @@ _route_cache: dict[str, str] = {}
 _ROUTE_CACHE_MAX = 200
 
 
-_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool,reconstruct_3d,precipitation_grid,building_extract,water_monitor,flood_sim_3d".split(",")
+_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool,reconstruct_3d,precipitation_grid,building_extract,water_monitor,flood_sim_3d,drone_mission".split(",")
 
 _ROUTE_SYSTEM = """你是路由模块。只回复工具名或SIMPLE。
 
@@ -653,6 +655,9 @@ async def _get_weather(lat: float = 33.19, lon: float = 104.89, days: int = 3) -
 
 
 _precip_cache: dict[str, tuple[float, dict]] = {}
+_last_flood_result: dict | None = None
+_last_flood_time: float = 0
+_last_flood_bbox: list[float] | None = None
 
 
 async def _fetch_precipitation_grid(
@@ -994,7 +999,7 @@ async def _simulate_flood_3d(bbox=None, location=None, rainfall_mm=100):
     import numpy as np
     sys.path.insert(0, str(Path(__file__).parent))
     from flood_sim.engine import fetch_elevation_grid, simulate_flood_2d
-    from segment.osm_buildings import fetch_osm_buildings
+    from segment.osm_buildings import fetch_osm_buildings, fetch_landuse, sample_cn_from_landuse
 
     if not bbox or len(bbox) != 4 or not all(isinstance(v, (int, float)) for v in bbox):
         if location:
@@ -1015,14 +1020,23 @@ async def _simulate_flood_3d(bbox=None, location=None, rainfall_mm=100):
     except Exception:
         buildings = []
 
-    for b in buildings:
-        b["_bbox_ref"] = bbox
+    osm_cn_grid = None
+    try:
+        landuse_polys = await fetch_landuse(bbox)
+        if landuse_polys:
+            grid_lats = np.linspace(bbox[1], bbox[3], elev_data["grid_n"]).tolist()
+            grid_lons = np.linspace(bbox[0], bbox[2], elev_data.get("grid_m", elev_data["grid_n"])).tolist()
+            osm_cn_grid = sample_cn_from_landuse(landuse_polys, grid_lats, grid_lons)
+            logger.info(f"[flood_sim_3d] OSM landuse CN: {len(landuse_polys)} polygons sampled")
+    except Exception as e:
+        logger.warning(f"[flood_sim_3d] Landuse fetch failed: {e}")
 
     result = simulate_flood_2d(
         np.array(elev_data["grid"]),
         buildings,
         bbox,
         rainfall_mm=float(rainfall_mm or 100),
+        osm_cn_grid=osm_cn_grid,
     )
 
     result["flood_sim_3d"] = True
@@ -1036,7 +1050,95 @@ async def _simulate_flood_3d(bbox=None, location=None, rainfall_mm=100):
     result["location"] = location or ""
 
     logger.info(f"[flood_sim_3d] Done: {result['stats']['safe']}safe/{result['stats']['partial']}partial/{result['stats']['submerged']}submerged")
+
+    global _last_flood_result, _last_flood_time, _last_flood_bbox
+    _last_flood_result = result
+    _last_flood_time = time.time()
+    _last_flood_bbox = bbox
     return result
+
+
+def _bbox_overlap(a: list[float], b: list[float]) -> bool:
+    if not a or not b or len(a) != 4 or len(b) != 4:
+        return False
+    return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
+
+
+async def _plan_drone_mission(bbox=None, location=None, mission_type="flood_inspect"):
+    import sys
+    import numpy as np
+    sys.path.insert(0, str(Path(__file__).parent))
+    from drone.mission import identify_risk_hotspots, plan_mission, MISSION_PROFILES
+
+    if not bbox or len(bbox) != 4 or not all(isinstance(v, (int, float)) for v in bbox):
+        if location:
+            coord = await _geocode_city(location)
+            if coord:
+                cx, cy = coord
+                half = 0.015
+                bbox = [cx - half, cy - half, cx + half, cy + half]
+        if not bbox:
+            bbox = [105.71, 34.57, 105.74, 34.60]
+
+    logger.info(f"[drone_mission] Planning {mission_type} for bbox={bbox}")
+
+    flood_result = None
+    global _last_flood_result, _last_flood_time, _last_flood_bbox
+    if (_last_flood_result and _last_flood_bbox and
+        time.time() - _last_flood_time < 300 and
+        _bbox_overlap(_last_flood_bbox, bbox)):
+        logger.info("[drone_mission] Reusing recent flood simulation result")
+        flood_result = _last_flood_result
+    else:
+        try:
+            logger.info("[drone_mission] Running flood simulation for risk assessment...")
+            flood_result = await _simulate_flood_3d(bbox, location, 150)
+            if "error" in flood_result:
+                flood_result = None
+        except Exception as e:
+            logger.warning(f"[drone_mission] Flood sim failed: {e}")
+
+    if flood_result and flood_result.get("building_impacts"):
+        impacts = flood_result["building_impacts"]
+        depth_frames = flood_result.get("depth_frames", [])
+        if depth_frames:
+            peak_idx = max(range(len(depth_frames)), key=lambda i: max(max(r) for r in depth_frames[i]) if depth_frames[i] else 0)
+            depth_grid = depth_frames[peak_idx] if peak_idx < len(depth_frames) else depth_frames[-1]
+        else:
+            depth_grid = []
+
+        grid_lats = flood_result.get("grid_lats", [])
+        grid_lons = flood_result.get("grid_lons", [])
+
+        hotspots = identify_risk_hotspots(impacts, depth_grid, grid_lats, grid_lons, bbox)
+        logger.info(f"[drone_mission] Found {len(hotspots)} risk hotspots from flood sim")
+    else:
+        hotspots = _generate_default_waypoints(bbox, mission_type)
+
+    result = plan_mission(hotspots, bbox, mission_type)
+    result["flood_summary"] = {
+        "rainfall_mm": flood_result.get("rainfall_mm") if flood_result else 0,
+        "peak_depth_m": flood_result.get("stats", {}).get("peak_depth_m") if flood_result else 0,
+        "flooded_pct": flood_result.get("stats", {}).get("max_flooded_area_pct") if flood_result else 0,
+        "buildings_at_risk": (flood_result.get("stats", {}).get("partial", 0) + flood_result.get("stats", {}).get("submerged", 0)) if flood_result else 0,
+    } if flood_result else None
+
+    logger.info(f"[drone_mission] Done: {result['n_waypoints']} waypoints, {result['total_distance_km']}km, {result['estimated_flight_min']}min")
+    return result
+
+
+def _generate_default_waypoints(bbox, mission_type):
+    import math
+    west, south, east, north = bbox
+    n = 8
+    hotspots = []
+    for i in range(n):
+        angle = 2 * math.pi * i / n
+        r = 0.3
+        lat = (south + north) / 2 + r * (north - south) / 2 * math.sin(angle)
+        lon = (west + east) / 2 + r * (east - west) / 2 * math.cos(angle)
+        hotspots.append({"lat": lat, "lon": lon, "type": "survey", "risk_score": 5, "label": f"巡查点{i+1}"})
+    return hotspots
 
 
 class DigitalTwinBridge:
@@ -1607,6 +1709,7 @@ GLM_TOOLS.extend([
     {"type": "function", "function": {"name": "building_extract", "description": "AI建筑提取与3D建模：自动下载目标区域高清卫星影像，利用SAM大模型分割所有建筑物轮廓，估算建筑高度，生成3D拉伸白模叠到地图上。输出GeoJSON建筑 footprint + 高度数据。当用户要求建筑识别/建筑提取/建筑物识别/房子识别/地物提取/卫星建筑/3D城市建模时调用。注意：需要选择城市/城镇区域，山区农田没有建筑。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "城市或地点名称，如'天水'、'兰州'、'西安'、'陇南'。当用户提到城市名时填此项。"}}, "required": []}}},
     {"type": "function", "function": {"name": "water_monitor", "description": "遥感水体监测：自动下载Sentinel-2卫星影像(10m分辨率)，计算NDWI水体指数，提取河湖水库水体范围。输出GeoJSON水体多边形+面积统计+覆盖率。当用户要求水体监测/水体识别/河湖监测/水面面积/水体变化/水体提取/NDWI时调用。支持任意区域。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "地点名称，如'陇南'、'白龙江'、'天水'。"}}, "required": []}}},
     {"type": "function", "function": {"name": "flood_sim_3d", "description": "洪水淹没3D推演：自动获取地形高程+建筑轮廓，模拟降雨→径流→淹没过程，生成3D淹没动画(建筑逐栋被淹、水位上涨)。当用户要求洪水推演/淹没模拟/暴雨会不会淹/城市内涝模拟/3D洪水时调用。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "城市或地点名称，如'天水'、'陇南'。"}, "rainfall_mm": {"type": "number", "description": "降雨量(mm)，默认100", "default": 100}, "return_period": {"type": "string", "description": "重现期，如'50年一遇'、'100年一遇'，默认空"}}, "required": []}}},
+    {"type": "function", "function": {"name": "drone_mission", "description": "无人机航线自主规划：基于洪水推演结果自动识别风险热点，生成最优巡查航点(TSP路径优化)，输出航线+航点+KML文件。当用户要求无人机巡查/航线规划/飞行计划/航拍规划/无人机巡检/drone时调用。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "城市或地点名称。"}, "mission_type": {"type": "string", "description": "任务类型: flood_inspect(洪水巡查), dam_inspect(堤坝巡检), search_rescue(搜救搜索), damage_assess(灾后评估)。默认flood_inspect。"}}, "required": []}}},
 ])
 
 TOOL_TO_SERVER["weather_forecast"] = "internal"
@@ -1618,6 +1721,7 @@ TOOL_TO_SERVER["precipitation_grid"] = "internal"
 TOOL_TO_SERVER["building_extract"] = "internal"
 TOOL_TO_SERVER["water_monitor"] = "internal"
 TOOL_TO_SERVER["flood_sim_3d"] = "internal"
+TOOL_TO_SERVER["drone_mission"] = "internal"
 
 ROUTING_RULES.extend([
     (r"天气预报|降雨预报|气象预报|查天气", "weather_forecast"),
@@ -1626,6 +1730,7 @@ ROUTING_RULES.extend([
     (r"散点插值|插值|griddata|IDW|克里金|Kriging|反距离|空间插值", "scatter_interpolate"),
     (r"3D|三维|3d|重建|reconstruct|建模|立体", "reconstruct_3d"),
     (r"洪水推演|淹没模拟|暴雨.*淹|城市内涝|3D洪水|洪水3D|内涝模拟|会不会淹|淹没3D|洪水动画|内涝|涨水", "flood_sim_3d"),
+    (r"无人机|航线|飞行计划|航拍|巡检|drone|uav|巡查航线|航线规划", "drone_mission"),
     (r"降水|降雨|雨量|面雨量|暴雨分析|precipitation|气象网格|降水监测|降水分析|降雨分析|降水分布|降雨分布|降水预报|降雨过程|降雨预报", "precipitation_grid"),
     (r"建筑识别|建筑提取|建筑物|建筑|房子识别|楼房|地物提取|卫星建筑|城市建模|建筑分割|building|建筑3D|建筑三维", "building_extract"),
     (r"水体监测|水体识别|水体提取|河湖监测|水面面积|水体变化|NDWI|水体分析|遥感水体|水域监测|水库监测", "water_monitor"),
@@ -1759,6 +1864,8 @@ async def _handle_internal_tool(tool_name: str, args: dict, user_msg: str = "") 
         return await _monitor_water(args.get("bbox"), args.get("location"))
     if tool_name == "flood_sim_3d":
         return await _simulate_flood_3d(args.get("bbox"), args.get("location"), args.get("rainfall_mm", 100))
+    if tool_name == "drone_mission":
+        return await _plan_drone_mission(args.get("bbox"), args.get("location"), args.get("mission_type", "flood_inspect"))
     return {"error": f"Unknown internal tool: {tool_name}"}
 
 
