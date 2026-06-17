@@ -1,6 +1,7 @@
 import httpx
 import math
 import logging
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,127 @@ def _map_osm_type(osm_type: str, area_m2: float, height_m: int) -> dict:
     if t in ("residential", "apartments", "house", "detached", "terrace", "dormitory"):
         if height_m >= 12:
             return {"type": "高层住宅", "icon": "🏢", "color": "#60a5fa"}
-        return {"type": "低层住宅", "icon": "🏠", "color": "#4ade80"}
+    return {"type": "低层住宅", "icon": "🏠", "color": "#4ade80"}
+
+
+LANDUSE_CN = {
+    "residential": 85, "commercial": 92, "industrial": 90, "retail": 90,
+    "farmland": 75, "farmyard": 80, "meadow": 65, "grass": 65,
+    "forest": 55, "orchard": 65, "vineyard": 70,
+    "cemetery": 70, "allotments": 75, "garages": 92,
+    "construction": 88, "brownfield": 80, "landfill": 85,
+    "salt_pond": 98, "basin": 98, "reservoir": 98,
+    "recreation_ground": 68, "village_green": 65,
+    "quarry": 88, "railway": 92,
+}
+
+NATURAL_CN = {
+    "wood": 55, "forest": 55, "scrub": 60, "heath": 62,
+    "grassland": 65, "wetland": 85, "water": 98, "lake": 98,
+    "river": 98, "stream": 98, "pond": 98,
+    "beach": 75, "sand": 78, "bare_rock": 88,
+}
+
+SURFACE_CN = {
+    "asphalt": 98, "concrete": 97, "paving_stones": 92,
+    "sett": 90, "cobblestone": 88, "gravel": 75,
+    "unpaved": 72, "compacted": 78, "soil": 70,
+}
+
+
+async def fetch_landuse(bbox: list[float]) -> list[dict]:
+    south, west, north, east = bbox[1], bbox[0], bbox[3], bbox[2]
+    query = (
+        f'[out:json][timeout:25];'
+        f'('
+        f'way["landuse"]({south},{west},{north},{east});'
+        f'relation["landuse"]({south},{west},{north},{east});'
+        f'way["natural"]({south},{west},{north},{east});'
+        f'way["highway"]({south},{west},{north},{east});'
+        f');'
+        f'out geom;'
+    )
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.post(OVERPASS_URL, data={"data": query})
+        r.raise_for_status()
+        data = r.json()
+
+    polygons = []
+    for el in data.get("elements", []):
+        if el["type"] != "way":
+            continue
+        geom = el.get("geometry", [])
+        if len(geom) < 3:
+            continue
+        tags = el.get("tags", {})
+
+        cn = None
+        source_type = ""
+        if "landuse" in tags:
+            cn = LANDUSE_CN.get(tags["landuse"], 75)
+            source_type = tags["landuse"]
+        elif "natural" in tags:
+            cn = NATURAL_CN.get(tags["natural"], 70)
+            source_type = tags["natural"]
+        elif "highway" in tags:
+            cn = 95
+            source_type = f"highway:{tags['highway']}"
+
+        if cn is None:
+            continue
+
+        coords = [[p["lon"], p["lat"]] for p in geom]
+        coords.append(coords[0])
+
+        lons = [c[0] for c in coords[:-1]]
+        lats = [c[1] for c in coords[:-1]]
+
+        polygons.append({
+            "type": source_type,
+            "cn": cn,
+            "polygon": coords,
+            "min_lon": min(lons), "max_lon": max(lons),
+            "min_lat": min(lats), "max_lat": max(lats),
+        })
+
+    logger.info(f"[OSM] Fetched {len(polygons)} landuse/natural polygons")
+    return polygons
+
+
+def sample_cn_from_landuse(
+    landuse_polygons: list[dict],
+    grid_lats: list[float],
+    grid_lons: list[float],
+) -> np.ndarray | None:
+    import numpy as np
+    if not landuse_polygons or not grid_lats or not grid_lons:
+        return None
+
+    gn = len(grid_lats)
+    gm = len(grid_lons)
+    cn_grid = np.full((gn, gm), -1, dtype=np.float64)
+
+    from matplotlib.path import Path
+
+    for poly in landuse_polygons:
+        pg = poly["polygon"]
+        min_lon, max_lon = poly["min_lon"], poly["max_lon"]
+        min_lat, max_lat = poly["min_lat"], poly["max_lat"]
+
+        path = Path([(c[1], c[0]) for c in pg])
+
+        for ri in range(gn):
+            lat = grid_lats[ri]
+            if lat < min_lat or lat > max_lat:
+                continue
+            for ci in range(gm):
+                lon = grid_lons[ci]
+                if lon < min_lon or lon > max_lon:
+                    continue
+                if cn_grid[ri, ci] < 0 and path.contains_point((lat, lon)):
+                    cn_grid[ri, ci] = poly["cn"]
+
+    return cn_grid
     if t in ("commercial", "retail", "shop", "mall", "supermarket"):
         return {"type": "商业办公", "icon": "🏬", "color": "#22d3ee"}
     if t in ("industrial", "warehouse", "factory", "manufacture"):

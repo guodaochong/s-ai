@@ -195,6 +195,7 @@ def simulate_flood_2d(
     duration_h: int = 6,
     dt_min: float = 15,
     manning_n: float = 0.035,
+    osm_cn_grid: np.ndarray = None,
 ) -> dict:
     from .hydro_chain import (
         extract_stream_network, find_stream_nodes,
@@ -218,7 +219,7 @@ def simulate_flood_2d(
 
     # ── Step 2: 分布式水文 ──
     logger.info("[flood_2d] Step2: Distributed CN assignment...")
-    cn_grid = assign_distributed_cn(dem, fdir)
+    cn_grid = assign_distributed_cn(dem, fdir, osm_cn_grid)
     s_grid = 25400.0 / cn_grid - 254
     ia_grid = 0.2 * s_grid
     excess_grid = np.where(rainfall_mm > ia_grid,

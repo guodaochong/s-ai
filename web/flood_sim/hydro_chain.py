@@ -50,13 +50,12 @@ def find_stream_nodes(fdir: np.ndarray, stream: np.ndarray) -> list[dict]:
     return nodes
 
 
-def assign_distributed_cn(dem: np.ndarray, fdir: np.ndarray) -> np.ndarray:
+def assign_distributed_cn(dem: np.ndarray, fdir: np.ndarray, osm_cn: np.ndarray = None) -> np.ndarray:
     rows, cols = dem.shape
     gy, gx = np.gradient(dem)
     slope_deg = np.arctan(np.sqrt(gx**2 + gy**2)) * 180 / math.pi
 
     cn = np.full((rows, cols), 75.0)
-
     cn[slope_deg < 3] = 82
     cn[(slope_deg >= 3) & (slope_deg < 8)] = 78
     cn[(slope_deg >= 8) & (slope_deg < 15)] = 72
@@ -65,6 +64,12 @@ def assign_distributed_cn(dem: np.ndarray, fdir: np.ndarray) -> np.ndarray:
 
     local_min = dem < (dem.mean() - dem.std() * 0.5)
     cn[local_min] = np.minimum(cn[local_min] + 5, 92)
+
+    if osm_cn is not None and osm_cn.shape == (rows, cols):
+        has_osm = osm_cn >= 0
+        cn[has_osm] = osm_cn[has_osm]
+        n_osm = int(has_osm.sum())
+        logger.info(f"[hydro_chain] OSM landuse CN applied to {n_osm}/{rows*cols} cells ({n_osm/(rows*cols)*100:.0f}%)")
 
     return cn
 
