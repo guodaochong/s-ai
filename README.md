@@ -3,10 +3,10 @@
   <img src="https://img.shields.io/badge/Vue_3.5-4FC08D?style=for-the-badge&logo=vue.js&logoColor=white">
   <img src="https://img.shields.io/badge/Three.js-r160-black?style=for-the-badge&logo=three.js&logoColor=white">
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?style=for-the-badge&logo=fastapi&logoColor=white">
-  <img src="https://img.shields.io/badge/GLM-5.1-6366F1?style=for-the-badge">
   <img src="https://img.shields.io/badge/MCP-Protocol-F97316?style=for-the-badge">
   <img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge">
 </p>
+
 
 <h1 align="center">
   S-AI · 水利空间智能体平台
@@ -26,7 +26,7 @@
 
 **S-AI 打破了这个壁垒。**
 
-我们将 **GLM 大语言模型的推理能力**、**MCP 微服务协议的工具编排能力**、**Leaflet + Three.js 的空间可视化能力**编织成一个有机整体。这不是一个套了地图壳的聊天机器人——这是一个**真正理解"空间"的人工智能体**：它能从一句自然语言中推断出你需要什么工具、什么参数、什么顺序，并自主完成从 DEM 采样到三维渲染的全链路计算。
+我们将 **大语言模型的推理能力**、**MCP 微服务协议的工具编排能力**、**Leaflet + Three.js 的空间可视化能力**编织成一个有机整体。这不是一个套了地图壳的聊天机器人——这是一个**真正理解"空间"的人工智能体**：它能从一句自然语言中推断出你需要什么工具、什么参数、什么顺序，并自主完成从 DEM 采样到三维渲染的全链路计算。
 
 ```
 "查询纬度33.197经度104.893的高程和坡度"
@@ -168,7 +168,7 @@
                              │ 未命中
                              ▼
 ┌─ L2: LLM 意图分类 ──────────────────────────────────────────────┐
-│  GLM-4-flash 推断意图 → 映射到 7 个服务域                           │
+│  LLM 推断意图 → 映射到 7 个服务域                           │
 │  延迟 ~500ms，准确率 ~90%                                          │
 └────────────────────────────┬────────────────────────────────────────┘
                              │ 置信度不足
@@ -491,7 +491,7 @@ Open-Meteo ERA5-Land API (0.1° ~9km)
   │
   ▼
 ┌─ ① 城市定位 ──────────────────────────────────────────────────┐
-│  GLM传入 location="天水" → 46城内置坐标 / Nominatim在线地理编码    │
+│  LLM传入 location="天水" → 46城内置坐标 / Nominatim在线地理编码    │
 │  → bbox 生成 (±0.015°, ~3km²)                                    │
 └──────────────────────────┬─────────────────────────────────────┘
                            ▼
