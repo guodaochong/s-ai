@@ -422,7 +422,7 @@ WorkflowEditor 提供可视化 DAG 编排能力：
 
 ### 🏗️ AI 三维重建 (TripoSR)
 
-![image-20260617110240213](.\img\3D.jpg)
+![image-20260617110240213](img/3D.jpg)
 
 单张照片秒出3D网格模型，适用于水工建筑物、堤防、桥梁的3D数字化：
 
@@ -435,7 +435,7 @@ WorkflowEditor 提供可视化 DAG 编排能力：
 
 ### 🏙️ 建筑识别 (OSM + SAM)
 
-![image-20260617110240213](.\img\building.jpg)
+![image-20260617110240213](img/building.jpg)
 
 双数据源建筑提取，优先使用OpenStreetMap精确轮廓：
 
@@ -448,7 +448,7 @@ WorkflowEditor 提供可视化 DAG 编排能力：
 
 ### 🌊 遥感水体监测 (Sentinel-2)
 
-![image-20260617110240213](.\img\water.jpg)
+![image-20260617110240213](img/water.jpg)
 
 自动下载Sentinel-2 L2A卫星影像（10m分辨率），计算NDWI提取水体：
 
@@ -465,7 +465,7 @@ STAC API搜索 → 云量过滤 → 覆盖检查
 
 ### 🌧️ 气象降水网格 (ERA5-Land 9km)
 
-![image-20260617110240213](.\img\qpf.jpg)
+![image-20260617110240213](img/qpf.jpg)
 
 逐小时降水网格动画，6级气象色阶，暴雨中心随时间轴移动：
 
@@ -480,7 +480,7 @@ Open-Meteo ERA5-Land API (0.1° ~9km)
 
 ## ◆ 分布式水文 × 二维水动力淹没推演
 
-![image-20260617110240213](.\img\flood.jpg)
+![image-20260617110240213](img/flood.jpg)
 
 这是S-AI最核心的AI能力——从一句自然语言出发，自主编排完整的 **降雨→产流→汇流→淹没→建筑评估** 全链路物理推演，13秒内给出科学可信的结果。
 
@@ -569,7 +569,7 @@ Open-Meteo ERA5-Land API (0.1° ~9km)
 
 ## ◆ 无人机自主航线规划
 
-![image-20260617110350619](.\img\UAV.png)
+![image-20260617110350619](img/UAV.png)
 
 当洪水推演完成后，AI自动识别风险热点，为无人机巡查生成最优航线——**从数字孪生的输出，跃升到现实世界的行动指令**。
 
