@@ -18,6 +18,7 @@ export const useChatStore = defineStore('chat', () => {
   const totalMs = ref(0)
   const lastExportData = ref<{ tool: string; server: string; result: any; ts: number }>({ tool: '', server: '', result: null, ts: 0 })
   const allExportData = ref<{ tool: string; result: any }[]>([])
+  const pendingDrawMessage = ref<string>('')
   const events = ref<{ agent: string; action: string; detail: string }[]>([])
   const eventCount = ref(0)
 
@@ -170,5 +171,6 @@ export const useChatStore = defineStore('chat', () => {
     addThinkingLine, startThinking, closeThinking, markThinkingDone, clearThinking,
     addToolResult, addToolHtml, addToolStatus, addDivider, setChainSuggestions,
     resetStreamState, endStream, addEvent,
+    pendingDrawMessage,
   }
 })

@@ -24,6 +24,14 @@ function handleSend() {
   nextTick(scrollToBottom)
 }
 
+watch(() => chatStore.pendingDrawMessage, (msg) => {
+  if (msg && !chatStore.isStreaming) {
+    inputText.value = msg
+    handleSend()
+    chatStore.pendingDrawMessage = ''
+  }
+})
+
 async function handleImageSelect(e: Event) {
   const input = e.target as HTMLInputElement
   if (!input.files?.length) return

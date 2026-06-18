@@ -3,15 +3,22 @@ import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import L from 'leaflet'
 import { useMapStore } from '@/stores/map'
 import { useThreeStore } from '@/stores/three'
+import { useChatStore } from '@/stores/chat'
 
 const mapStore = useMapStore()
 const threeStore = useThreeStore()
+const chatStore = useChatStore()
 const mapContainer = ref<HTMLDivElement>()
 const threeContainer = ref<HTMLDivElement>()
 const coordLabel = ref('LatLng: --')
 const showLayerPanel = ref(false)
+const showDrawPanel = ref(false)
+const isDrawing = ref(false)
+const drawnBbox = ref<number[]>([])
 let initialized = false
 let map: L.Map | null = null
+let drawStart: L.LatLng | null = null
+let currentRect: L.Rectangle | null = null
 
 onMounted(() => {
   if (!mapContainer.value) return
@@ -19,6 +26,7 @@ onMounted(() => {
     center: [33.19, 104.89],
     zoom: 13,
     zoomControl: false,
+    attributionControl: false,
   })
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
     maxZoom: 19,
@@ -28,6 +36,11 @@ onMounted(() => {
   map.on('mousemove', (e: L.LeafletMouseEvent) => {
     coordLabel.value = `LatLng: ${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`
   })
+
+  const mc = map.getContainer()
+  mc.addEventListener('mousedown', handleDomMouseDown)
+  mc.addEventListener('mousemove', handleDomMouseMove)
+  document.addEventListener('mouseup', handleDomMouseUp)
 })
 
 watch(() => threeStore.show3D, async (is3D) => {
@@ -53,6 +66,87 @@ function flyTo(lat: number, lng: number, zoom: number) {
 
 function toggleLayerPanel() {
   showLayerPanel.value = !showLayerPanel.value
+}
+
+function startDraw() {
+  if (!map) return
+  if (currentRect) { map.removeLayer(currentRect); currentRect = null }
+  showDrawPanel.value = false
+  isDrawing.value = true
+  map.dragging.disable()
+  map.getContainer().style.cursor = 'crosshair'
+}
+
+function stopDraw() {
+  isDrawing.value = false
+  drawStart = null
+  if (map) {
+    map.dragging.enable()
+    map.getContainer().style.cursor = ''
+  }
+}
+
+function getMapPoint(e: MouseEvent): L.Point {
+  const rect = map!.getContainer().getBoundingClientRect()
+  return L.point(e.clientX - rect.left, e.clientY - rect.top)
+}
+
+function handleDomMouseDown(e: MouseEvent) {
+  if (!isDrawing.value || !map) return
+  e.preventDefault()
+  drawStart = map.containerPointToLatLng(getMapPoint(e))
+  if (currentRect) { map.removeLayer(currentRect) }
+  currentRect = L.rectangle([drawStart, drawStart], {
+    color: '#00d4ff', weight: 2, fillColor: '#00d4ff', fillOpacity: 0.1, dashArray: '6 4',
+  })
+  currentRect.addTo(map)
+}
+
+function handleDomMouseMove(e: MouseEvent) {
+  if (!isDrawing.value || !drawStart || !map || !currentRect) return
+  const end = map.containerPointToLatLng(getMapPoint(e))
+  currentRect.setBounds(L.latLngBounds(drawStart, end))
+}
+
+function handleDomMouseUp(e: MouseEvent) {
+  if (!isDrawing.value || !drawStart || !map) return
+  const end = map.containerPointToLatLng(getMapPoint(e))
+  const bounds = L.latLngBounds(drawStart, end)
+  if (Math.abs(bounds.getNorth() - bounds.getSouth()) < 0.001 ||
+      Math.abs(bounds.getEast() - bounds.getWest()) < 0.001) {
+    stopDraw()
+    return
+  }
+  drawnBbox.value = [
+    Math.round(bounds.getWest() * 1000) / 1000,
+    Math.round(bounds.getSouth() * 1000) / 1000,
+    Math.round(bounds.getEast() * 1000) / 1000,
+    Math.round(bounds.getNorth() * 1000) / 1000,
+  ]
+  showDrawPanel.value = true
+  stopDraw()
+}
+
+function clearDraw() {
+  if (currentRect && map) { map.removeLayer(currentRect); currentRect = null }
+  showDrawPanel.value = false
+}
+
+function triggerAnalysis(type: string) {
+  if (drawnBbox.value.length !== 4) return
+  const [w, s, e, n] = drawnBbox.value
+  const bboxStr = `[${w},${s},${e},${n}]`
+  const messages: Record<string, string> = {
+    flood: `分析区域${bboxStr}暴雨150mm会不会淹`,
+    building: `识别区域${bboxStr}的建筑`,
+    precip: `展示区域${bboxStr}的降雨过程`,
+    water: `监测区域${bboxStr}的水体`,
+    drone: `规划区域${bboxStr}的无人机巡查航线`,
+  }
+  const msg = messages[type] || ''
+  if (!msg) return
+  showDrawPanel.value = false
+  chatStore.pendingDrawMessage = msg
 }
 
 function removeLayer(id: string) {
@@ -99,6 +193,22 @@ function addDemoLayer() {
         {{ threeStore.show3D ? '■ 2D地图' : '△ 3D地形' }}
       </button>
       <button class="map-btn" @click="toggleLayerPanel()" title="图层管理">☰ 图层</button>
+      <button class="map-btn" @click="startDraw()" title="画框分析" style="color:#00ff88;border-color:#00ff88">{{ isDrawing ? '✏ 拖拽画框...' : '✏ 画框分析' }}</button>
+    </div>
+
+    <div v-if="showDrawPanel" class="draw-panel">
+      <div class="dp-header">
+        <span>📍 选定区域分析</span>
+        <button class="dp-close" @click="clearDraw">✕</button>
+      </div>
+      <div class="dp-bbox">bbox: [{{ drawnBbox.map(v => v.toFixed(3)).join(', ') }}]</div>
+      <div class="dp-actions">
+        <button class="dp-btn" @click="triggerAnalysis('flood')">🌊 会淹吗？</button>
+        <button class="dp-btn" @click="triggerAnalysis('building')">🏙️ 识别建筑</button>
+        <button class="dp-btn" @click="triggerAnalysis('precip')">🌧️ 降雨过程</button>
+        <button class="dp-btn" @click="triggerAnalysis('water')">🌊 水体监测</button>
+        <button class="dp-btn" @click="triggerAnalysis('drone')">🚁 无人机航线</button>
+      </div>
     </div>
 
     <div class="map-toolbar">
@@ -380,4 +490,63 @@ function addDemoLayer() {
 .ht-speed:hover { border-color: var(--accent); color: var(--accent); }
 .ht-speed.active { background: var(--accent); color: #000; border-color: var(--accent); }
 .ht-info { margin-left: auto; color: var(--text-dim); font-size: 10px; }
+
+.draw-panel {
+  position: absolute;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1001;
+  background: rgba(8, 14, 28, 0.95);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 255, 136, 0.2);
+  border-radius: 12px;
+  padding: 12px 16px;
+  min-width: 280px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+.draw-panel .dp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 700;
+  color: #00ff88;
+  margin-bottom: 6px;
+}
+.draw-panel .dp-close {
+  width: 22px; height: 22px;
+  border-radius: 6px; border: none;
+  background: rgba(255,255,255,0.05);
+  color: #94a3b8; cursor: pointer;
+  font-size: 11px;
+}
+.draw-panel .dp-close:hover { background: rgba(239,68,68,0.15); color: #ef4444; }
+.draw-panel .dp-bbox {
+  font-size: 10px;
+  color: #64748b;
+  font-family: 'JetBrains Mono', monospace;
+  margin-bottom: 8px;
+}
+.draw-panel .dp-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.draw-panel .dp-btn {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 212, 255, 0.15);
+  background: rgba(0, 212, 255, 0.06);
+  color: #e2e8f0;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+}
+.draw-panel .dp-btn:hover {
+  background: rgba(0, 212, 255, 0.15);
+  border-color: rgba(0, 212, 255, 0.4);
+  color: #00d4ff;
+}
 </style>

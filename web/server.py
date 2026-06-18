@@ -815,7 +815,7 @@ async def _fetch_precipitation_grid(
     if storm_centers:
         peak_sc = max(storm_centers, key=lambda s: s["mm"])
         try:
-            async with httpx.AsyncClient(timeout=4) as gc:
+            async with httpx.AsyncClient(timeout=10) as gc:
                 resp = await gc.get(
                     "https://nominatim.openstreetmap.org/reverse",
                     params={"lat": peak_sc["lat"], "lon": peak_sc["lon"], "format": "json", "zoom": 14, "accept-language": "zh"},
