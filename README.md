@@ -405,7 +405,7 @@ done            → 推理完成
 
 ## ◆ 智能体编排 · Workflow DAG
 
-![image-20260617110240213](img\mcp.png)
+![image-20260617110240213](img/mcp.png)
 
 WorkflowEditor 提供可视化 DAG 编排能力：
 
