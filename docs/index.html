@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>S-AI: Multi-Agent Spatial Intelligence for Hydrodynamic Flood Simulation</title>
+<style>
+:root {
+  --bg: #0a0e1a; --bg2: #0f1525; --card: #131a2e;
+  --border: rgba(0,212,255,0.12); --accent: #00d4ff; --accent2: #00ff88;
+  --text: #e2e8f0; --dim: #64748b; --warn: #f59e0b;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:'Georgia',serif; line-height:1.8; }
+.container { max-width:820px; margin:0 auto; padding:40px 24px 80px; }
+
+/* Hero */
+.hero { text-align:center; padding:60px 0 40px; }
+.hero h1 { font-size:28px; font-weight:700; line-height:1.4; color:#fff; margin-bottom:12px; }
+.hero .authors { font-size:14px; color:var(--accent); margin-bottom:4px; }
+.hero .affil { font-size:12px; color:var(--dim); }
+.hero .badges { margin-top:16px; display:flex; justify-content:center; gap:8px; flex-wrap:wrap; }
+.badge { padding:4px 12px; border-radius:20px; font-size:11px; font-family:'JetBrains Mono',monospace; border:1px solid var(--border); color:var(--accent); }
+
+/* Abstract */
+.abstract { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:28px; margin:32px 0; }
+.abstract h2 { font-size:14px; color:var(--dim); text-transform:uppercase; letter-spacing:2px; margin-bottom:12px; }
+.abstract p { font-size:14px; color:var(--text); text-align:justify; }
+
+/* Sections */
+h2.section-title { font-size:20px; color:#fff; margin:40px 0 16px; padding-bottom:8px; border-bottom:1px solid var(--border); }
+h3 { font-size:16px; color:var(--accent); margin:24px 0 12px; }
+p { font-size:14px; text-align:justify; margin-bottom:12px; }
+
+/* Code blocks */
+pre { background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:16px; overflow-x:auto; margin:16px 0; }
+code { font-family:'JetBrains Mono','Courier New',monospace; font-size:12px; color:var(--accent2); }
+pre code { color:var(--text); }
+
+/* Tables */
+table { width:100%; border-collapse:collapse; margin:16px 0; font-size:13px; }
+th { background:var(--bg2); color:var(--accent); padding:10px 12px; text-align:left; border-bottom:2px solid var(--border); font-weight:600; }
+td { padding:8px 12px; border-bottom:1px solid rgba(255,255,255,0.04); }
+tr:hover td { background:rgba(0,212,255,0.03); }
+
+/* Pipeline diagram */
+.pipeline { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:24px; margin:20px 0; }
+.pipeline .step { display:flex; align-items:flex-start; gap:12px; margin:10px 0; }
+.pipeline .step-num { background:var(--accent); color:#000; font-weight:700; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; flex-shrink:0; margin-top:2px; }
+.pipeline .step-body { font-size:13px; }
+.pipeline .step-body b { color:var(--accent); }
+.pipeline .arrow { color:var(--dim); text-align:center; font-size:12px; margin:4px 0; }
+
+/* Screenshots */
+.gallery { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:24px 0; }
+.gallery img { width:100%; border-radius:8px; border:1px solid var(--border); }
+.gallery .caption { font-size:11px; color:var(--dim); text-align:center; margin-top:6px; }
+.gallery-item { text-align:center; }
+
+/* Demo commands */
+.demos { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; margin:20px 0; }
+.demo-cmd { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--accent2); background:var(--bg); padding:8px 12px; border-radius:6px; margin:6px 0; display:flex; align-items:center; gap:8px; }
+.demo-cmd .icon { font-size:16px; }
+
+/* Stats cards */
+.stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:20px 0; }
+.stat { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:16px; text-align:center; }
+.stat .val { font-size:24px; font-weight:800; color:var(--accent); font-family:'JetBrains Mono',monospace; }
+.stat .lbl { font-size:10px; color:var(--dim); margin-top:4px; text-transform:uppercase; }
+
+/* Footer */
+.footer { text-align:center; padding:40px 0; color:var(--dim); font-size:12px; border-top:1px solid var(--border); margin-top:40px; }
+.footer a { color:var(--accent); text-decoration:none; }
+
+@media(max-width:640px) {
+  .gallery { grid-template-columns:1fr; }
+  .stats { grid-template-columns:1fr 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="hero">
+  <h1>S-AI: A Multi-Agent Spatial Intelligence Framework<br>for Distributed Hydrological Modeling and Autonomous Flood Assessment<br>via LLM-Orchestrated MCP Architecture</h1>
+  <div class="authors">Daochong Guo</div>
+  <div class="affil">LUOBIN-PI Research Lab · Spatial Intelligence & Hydroinformatics Division · Gansu, China</div>
+  <div class="badges">
+    <span class="badge">GLM-5.1</span>
+    <span class="badge">MCP Protocol</span>
+    <span class="badge">42+ Tools</span>
+    <span class="badge">8 Microservices</span>
+    <span class="badge">13s Pipeline</span>
+  </div>
+</div>
+
+<div class="abstract">
+  <h2>Abstract</h2>
+  <p>S-AI is a production-grade, multi-agent spatial intelligence platform that reconceptualizes flood modeling through LLM-orchestrated automation. The platform federates 42+ specialized geospatial and hydrological tools across eight MCP microservices, enabling natural language intent parsing via GLM-5.1 that autonomously decomposes user queries into executable hydrodynamic workflows. The system pioneers a <b>distributed hydrological modeling chain</b> that automates the complete pipeline from rainfall to building-level inundation assessment in under 15 seconds: SRTM 90m DEM acquisition → D8 watershed delineation → OSM land use-driven SCS-CN curve number assignment (CN 55–98) → time-area flow routing → 2D Manning shallow water inundation → per-building impact assessment. Beyond flood simulation, S-AI integrates autonomous drone mission planning, Sentinel-2 NDWI water body monitoring, TripoSR 3D reconstruction, and ERA5-Land precipitation grid analysis — all from natural language, with zero API cost beyond LLM inference.</p>
+</div>
+
+<h2 class="section-title">🚀 Quick Demo Commands</h2>
+<div class="demos">
+  <div class="demo-cmd"><span class="icon">🌊</span> "天水市暴雨24小时150mm会不会淹"</div>
+  <div class="demo-cmd"><span class="icon">🏙️</span> "识别天水市中心的建筑物"</div>
+  <div class="demo-cmd"><span class="icon">🌧️</span> "展示赤峰市未来三天预报降雨过程"</div>
+  <div class="demo-cmd"><span class="icon">🚁</span> "天水洪水无人机巡查航线"</div>
+  <div class="demo-cmd"><span class="icon">🛰️</span> "对比白龙江2024年6月和10月的水体变化"</div>
+</div>
+
+<h2 class="section-title">📊 Key Metrics</h2>
+<div class="stats">
+  <div class="stat"><div class="val">42+</div><div class="lbl">Tools</div></div>
+  <div class="stat"><div class="val">13s</div><div class="lbl">Full Pipeline</div></div>
+  <div class="stat"><div class="val">1174</div><div class="lbl">Buildings</div></div>
+  <div class="stat"><div class="val">0¥</div><div class="lbl">API Cost</div></div>
+</div>
+
+<h2 class="section-title">🔄 Flood Simulation Pipeline</h2>
+<div class="pipeline">
+  <div class="step"><div class="step-num">1</div><div class="step-body"><b>City Geocoding</b> — GLM passes location → 46 built-in cities + Nominatim → bbox</div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="step-num">2</div><div class="step-body"><b>SRTM DEM</b> — Terrarium 90m COG via AWS CloudFront → rasterio windowed read → 106×66 grid</div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="step-num">3</div><div class="step-body"><b>Watershed Delineation</b> — D8 flow direction → topological sort accumulation → stream network</div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="step-num">4</div><div class="step-body"><b>Distributed SCS-CN</b> — OSM landuse (residential→85, forest→55) → spatial runoff generation</div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="step-num">5</div><div class="step-body"><b>Flow Routing</b> — Manning velocity travel time → time-area histogram → discharge Q(t)</div></div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="step-num">6</div><div class="step-body"><b>2D Inundation</b> — Manning 8-neighbor diffusion → 13 depth frames → building impact</div></div>
+</div>
+
+<h2 class="section-title">🖼️ System Screenshots</h2>
+<div class="gallery">
+  <div class="gallery-item">
+    <img src="flood.jpg" alt="Flood Simulation">
+    <div class="caption">Distributed hydrology × 2D hydrodynamic inundation</div>
+  </div>
+  <div class="gallery-item">
+    <img src="building.jpg" alt="Building Extraction">
+    <div class="caption">OSM building footprints + 6-class taxonomy</div>
+  </div>
+  <div class="gallery-item">
+    <img src="qpf.jpg" alt="Precipitation Grid">
+    <div class="caption">ERA5-Land 9km animated precipitation heatmap</div>
+  </div>
+  <div class="gallery-item">
+    <img src="UAV.png" alt="Drone Mission">
+    <div class="caption">Autonomous drone TSP route planning + KML</div>
+  </div>
+  <div class="gallery-item">
+    <img src="water.jpg" alt="Water Monitoring">
+    <div class="caption">Sentinel-2 NDWI water body extraction</div>
+  </div>
+  <div class="gallery-item">
+    <img src="3D.jpg" alt="3D Reconstruction">
+    <div class="caption">TripoSR single-photo 3D reconstruction</div>
+  </div>
+</div>
+
+<h2 class="section-title">🏗️ Architecture</h2>
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│                    🖥️ Vue 3 Frontend (Port 5173)              │
+│  Leaflet Dark Map · Three.js 3D · SSE Streaming · 24+ Renderers │
+├───────────────────────────────────────────────────────────────┤
+│              ⚡ FastAPI Orchestration (Port 3000)              │
+│  GLM-5.1 ReAct · 3-Layer Routing · Debate · Auto-tool Gen     │
+│  Circuit Breaker · LRU Cache · Flood Cache · City Geocoding   │
+├───────────────────────────────────────────────────────────────┤
+│  AI Modules: TripoSR · SAM+OSM · Sentinel-2 NDWI · ERA5-Land  │
+│  Distributed Hydro (D8+SCS-CN+Manning) · Drone TSP · SRTM COG │
+├───────────────────────────────────────────────────────────────┤
+│  GIS:5001  Data:5002  Knowledge:5003  Map:5004               │
+│  Hydro:5005  Flood:5006  Raster:5007                          │
+└───────────────────────────────────────────────────────────────┘</code></pre>
+
+<h2 class="section-title">📋 Capability Comparison</h2>
+<table>
+<tr><th>Dimension</th><th>Traditional (HEC-HMS+RAS+ArcGIS)</th><th>S-AI</th></tr>
+<tr><td>Setup time</td><td>9+ hours expert work</td><td>13–18 seconds</td></tr>
+<tr><td>Software</td><td>3–5 separate applications</td><td>Single platform</td></tr>
+<tr><td>CN assignment</td><td>Manual land use mapping</td><td>OSM auto-rasterization</td></tr>
+<tr><td>Building impact</td><td>Manual GIS overlay</td><td>Per-building auto-sampling</td></tr>
+<tr><td>Drone planning</td><td>Separate software</td><td>AI TSP + KML export</td></tr>
+<tr><td>Cost</td><td>Licenses + HPC + expert</td><td>Free data + consumer GPU</td></tr>
+</table>
+
+<h2 class="section-title">📦 Tech Stack</h2>
+<table>
+<tr><th>Layer</th><th>Technology</th></tr>
+<tr><td>LLM</td><td>GLM-5.1 (ReAct 8-step, 3-layer routing, debate validation)</td></tr>
+<tr><td>Backend</td><td>Python 3.10 · FastAPI · MCP Protocol · 42+ tools</td></tr>
+<tr><td>Frontend</td><td>Vue 3 · Vite 8 · TypeScript · TailwindCSS · Pinia</td></tr>
+<tr><td>Map</td><td>Leaflet · CartoDB Dark · Rectangle draw → trigger analysis</td></tr>
+<tr><td>3D</td><td>Three.js · GLSL ShaderMaterial · OrbitControls</td></tr>
+<tr><td>Remote Sensing</td><td>Sentinel-2 STAC · SRTM Terrarium COG · ERA5-Land</td></tr>
+<tr><td>GIS Data</td><td>OpenStreetMap · ArcGIS World Imagery · Nominatim</td></tr>
+<tr><td>AI Models</td><td>TripoSR · SAM vit_b · GLM-4V</td></tr>
+</table>
+
+<h2 class="section-title">📁 Project Structure</h2>
+<pre><code>S-AI/
+├── web/
+│   ├── server.py              # Backend orchestration (2600+ lines)
+│   ├── reconstruct/           # TripoSR 3D reconstruction
+│   ├── segment/               # SAM + OSM building + landuse CN
+│   ├── water_monitor/         # Sentinel-2 NDWI + change detection
+│   ├── flood_sim/             # D8 + SCS-CN + Manning 2D
+│   ├── drone/                 # TSP mission planning + KML
+│   └── frontend/              # Vue 3 + Vite
+├── servers/                   # 7 MCP microservices
+├── docs/                      # This page
+└── paper.tex                  # Full LaTeX paper</code></pre>
+
+<div class="footer">
+  <p>Built by <b>LUOBIN-PI Research Lab</b> · MIT License</p>
+  <p><a href="https://gitee.com/luobinguodaochong/s-ai">📋 Source Code (Gitee)</a></p>
+</div>
+
+</div>
+</body>
+</html>
