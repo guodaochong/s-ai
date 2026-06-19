@@ -1241,6 +1241,106 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
       </div>`
     return { html, mapActions: actions }
   },
+
+  water_change(r, ms) {
+    if (!r.water_change) return { html: '', mapActions: [] }
+
+    const actions: (() => void)[] = []
+    const expanded = r.expanded_features || []
+    const shrunk = r.shrunk_features || []
+    const area1 = r.area1_km2 || 0
+    const area2 = r.area2_km2 || 0
+    const changePct = r.change_pct || 0
+    const date1 = r.date1 || '?'
+    const date2 = r.date2 || '?'
+    const bbox = r.bbox || []
+    const expandedM2 = r.expanded_m2 || 0
+    const shrunkM2 = r.shrunk_m2 || 0
+
+    actions.push(() => {
+      const map = ms.getMap()
+      if (!map) return
+
+      ;(map as any)._water_change_layer?.forEach((l: any) => map.removeLayer(l))
+      const container = map.getContainer()
+      const panel = container.closest('.map-panel') || container.parentElement
+      ;(panel as any)?.querySelector?.('#water-change-panel')?.remove?.()
+
+      const layers: any[] = []
+
+      expanded.forEach((f: any) => {
+        const coords = f.geometry?.coordinates?.[0]
+        if (!coords || coords.length < 3) return
+        const latlngs = coords.map((c: number[]) => [c[1], c[0]] as [number, number])
+        const poly = L.polygon(latlngs, { color: '#ef4444', weight: 1, fillColor: '#ef4444', fillOpacity: 0.5 })
+        poly.bindPopup(`<div style="font-size:11px"><b style="color:#ef4444">🔺 扩展区域</b><br/>面积: ${(f.properties?.area_m2 || 0).toFixed(0)} m²</div>`)
+        poly.addTo(map); layers.push(poly)
+      })
+
+      shrunk.forEach((f: any) => {
+        const coords = f.geometry?.coordinates?.[0]
+        if (!coords || coords.length < 3) return
+        const latlngs = coords.map((c: number[]) => [c[1], c[0]] as [number, number])
+        const poly = L.polygon(latlngs, { color: '#22c55e', weight: 1, fillColor: '#22c55e', fillOpacity: 0.5 })
+        poly.bindPopup(`<div style="font-size:11px"><b style="color:#22c55e">🔻 缩减区域</b><br/>面积: ${(f.properties?.area_m2 || 0).toFixed(0)} m²</div>`)
+        poly.addTo(map); layers.push(poly)
+      })
+
+      ;(map as any)._water_change_layer = layers
+      if (bbox.length === 4) map.fitBounds([[bbox[1], bbox[0]], [bbox[3], bbox[2]]], { padding: [50, 50] })
+
+      _injectBuildingCss()
+      if (panel) {
+        const sign = changePct >= 0 ? '+' : ''
+        const color = changePct >= 0 ? '#ef4444' : '#22c55e'
+        const div = document.createElement('div')
+        div.id = 'water-change-panel'
+        div.className = 'building-stats-panel'
+        div.innerHTML = `
+          <div class="bsp-header" style="background:rgba(168,85,247,0.08);border-color:rgba(168,85,247,0.15)">
+            <span class="bsp-icon">🛰️</span>
+            <span class="bsp-title" style="color:#a855f7">多期水体变化检测</span>
+            <button class="bsp-close" onclick="this.parentElement.parentElement.remove()">✕</button>
+          </div>
+          <div class="bsp-body">
+            <div class="bsp-stat"><div class="bsp-val" style="color:#60a5fa;font-size:16px">${area1}</div><div class="bsp-lbl">${date1} km²</div></div>
+            <div class="bsp-stat"><div class="bsp-val" style="color:${color};font-size:20px">${sign}${changePct}%</div><div class="bsp-lbl">变化</div></div>
+            <div class="bsp-stat"><div class="bsp-val" style="color:#60a5fa;font-size:16px">${area2}</div><div class="bsp-lbl">${date2} km²</div></div>
+          </div>
+          <div class="bsp-source" style="border-color:rgba(168,85,247,0.06)">
+            📡 Sentinel-2 L2A 10m 多期NDWI对比<br/>
+            📅 ${date1} (云${r.cloud1||'?'}%) → ${date2} (云${r.cloud2||'?'}%)<br/>
+            🔺 扩展${(expandedM2/10000).toFixed(2)}ha / 🔻 缩减${(shrunkM2/10000).toFixed(2)}ha
+          </div>
+          <div class="bsp-legend">
+            <div class="bsp-lg-title">变化类型</div>
+            <div class="bsp-lg-items">
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#ef4444"></span>🔺 新增水面</div>
+              <div class="bsp-lg-item"><span class="bsp-swatch" style="background:#22c55e"></span>🔻 消失水面</div>
+            </div>
+          </div>
+        `
+        panel.appendChild(div)
+      }
+    })
+
+    const sign = changePct >= 0 ? '+' : ''
+    const color = changePct >= 0 ? '#ef4444' : '#22c55e'
+    const html = `
+      <div class="tr-recon-card">
+        <div class="tr-recon-header" style="color:#a855f7">🛰️ 多期水体变化检测</div>
+        <div style="font-size:10px;color:#64748b;margin-bottom:8px">
+          Sentinel-2 L2A | ${date1} → ${date2}
+        </div>
+        <div class="tr-recon-stats">
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#60a5fa">${area1}km²</span><span class="tr-recon-lbl">${date1}</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:${color}">${sign}${changePct}%</span><span class="tr-recon-lbl">变化</span></div>
+          <div class="tr-recon-stat"><span class="tr-recon-num" style="color:#60a5fa">${area2}km²</span><span class="tr-recon-lbl">${date2}</span></div>
+        </div>
+        <div class="tr-sub" style="margin-top:4px">🔺扩展${(expandedM2/10000).toFixed(1)}ha | 🔻缩减${(shrunkM2/10000).toFixed(1)}ha | 变化区域已渲染到地图</div>
+      </div>`
+    return { html, mapActions: actions }
+  },
 }
 
 /* ── Generic renderer (fallback) ── */

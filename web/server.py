@@ -218,6 +218,8 @@ def _compress_result(tool: str, result: dict) -> str:
         return f"洪水推演: 降雨{result.get('rainfall_mm','?')}mm 安全{s.get('safe','?')}栋/部分{s.get('partial','?')}栋/淹没{s.get('submerged','?')}栋"
     if tool == "drone_mission":
         return f"无人机航线: {result.get('n_waypoints','?')}航点 {result.get('total_distance_km','?')}km {result.get('estimated_flight_min','?')}min"
+    if tool == "water_change":
+        return f"水体变化: {result.get('area1_km2','?')}→{result.get('area2_km2','?')}km² ({result.get('change_pct','?'):+.1f}%) {result.get('date1','?')}~{result.get('date2','?')}"
     return json.dumps(result, ensure_ascii=False)[:200]
 
 
@@ -295,7 +297,7 @@ _route_cache: dict[str, str] = {}
 _ROUTE_CACHE_MAX = 200
 
 
-_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool,reconstruct_3d,precipitation_grid,building_extract,water_monitor,flood_sim_3d,drone_mission".split(",")
+_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool,reconstruct_3d,precipitation_grid,building_extract,water_monitor,flood_sim_3d,drone_mission,water_change".split(",")
 
 _ROUTE_SYSTEM = """你是路由模块。只回复工具名或SIMPLE。
 
@@ -866,6 +868,9 @@ _CITY_COORDS = {
     "重庆": (106.5516, 29.5630), "武汉": (114.3055, 30.5928), "南京": (118.7969, 32.0603),
     "杭州": (120.1551, 30.2741), "广州": (113.2644, 23.1291), "深圳": (114.0579, 22.5431),
     "陇南": (104.9219, 33.3886), "定西": (104.6264, 35.5796), "平凉": (106.6652, 35.5428),
+    "白龙江": (104.9219, 33.3886), "嘉陵江": (106.1080, 32.5400), "渭河": (108.9398, 34.3416),
+    "黄河": (106.2309, 38.4872), "洮河": (103.8343, 35.3000), "大夏河": (102.5000, 35.5000),
+    "西汉水": (105.7000, 33.8000), "通天河": (104.3000, 33.0000),
     "庆阳": (107.6380, 35.7342), "酒泉": (98.4941, 39.7320), "张掖": (100.4496, 38.9252),
     "武威": (102.6385, 37.9283), "白银": (104.1386, 36.5447), "嘉峪关": (98.2773, 39.7865),
     "金昌": (102.1880, 38.5160), "临夏": (103.2104, 35.6011), "甘南": (102.9109, 34.9834),
@@ -967,16 +972,15 @@ async def _monitor_water(bbox=None, location=None):
     sys.path.insert(0, str(Path(__file__).parent))
     from water_monitor.engine import search_scenes, extract_water
 
+    if location:
+        coord = await _geocode_city(location)
+        if coord:
+            cx, cy = coord
+            half = 0.05
+            bbox = [cx - half, cy - half, cx + half, cy + half]
+            logger.info(f"[water_monitor] Geocoded '{location}' -> ({cx:.4f}, {cy:.4f})")
     if not bbox or len(bbox) != 4 or not all(isinstance(v, (int, float)) for v in bbox):
-        if location:
-            coord = await _geocode_city(location)
-            if coord:
-                cx, cy = coord
-                half = 0.05
-                bbox = [cx - half, cy - half, cx + half, cy + half]
-                logger.info(f"[water_monitor] Geocoded '{location}' -> ({cx:.4f}, {cy:.4f})")
-        if not bbox:
-            bbox = [104.85, 33.15, 105.05, 33.35]
+        bbox = [104.85, 33.15, 105.05, 33.35]
 
     logger.info(f"[water_monitor] Searching Sentinel-2 scenes for bbox={bbox}")
     scenes = await search_scenes(bbox, max_cloud=20, limit=30)
@@ -994,6 +998,53 @@ async def _monitor_water(bbox=None, location=None):
     return result
 
 
+async def _detect_water_change(bbox=None, location=None, date1="", date2=""):
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent))
+    from water_monitor.engine import search_scenes, detect_water_change
+
+    if location:
+        coord = await _geocode_city(location)
+        if coord:
+            cx, cy = coord
+            half = 0.05
+            bbox = [cx - half, cy - half, cx + half, cy + half]
+            logger.info(f"[water_change] Geocoded '{location}' -> ({cx:.4f}, {cy:.4f})")
+    if not bbox or len(bbox) != 4 or not all(isinstance(v, (int, float)) for v in bbox):
+        bbox = [104.85, 33.15, 105.05, 33.35]
+
+    if date1 and len(date1) >= 7:
+        y1, m1 = date1[:4], date1[5:7]
+        range1_start = f"{y1}-{m1}-01"
+        range1_end = f"{y1}-{m1}-28"
+    else:
+        range1_start, range1_end = "2024-06-01", "2024-07-31"
+
+    if date2 and len(date2) >= 7:
+        y2, m2 = date2[:4], date2[5:7]
+        range2_start = f"{y2}-{m2}-01"
+        range2_end = f"{y2}-{m2}-28"
+    else:
+        range2_start, range2_end = "2024-09-01", "2024-10-31"
+
+    logger.info(f"[water_change] bbox={bbox} period1={range1_start}~{range1_end} period2={range2_start}~{range2_end}")
+    scenes1 = await search_scenes(bbox, date_start=range1_start, date_end=range1_end, max_cloud=15)
+    scenes2 = await search_scenes(bbox, date_start=range2_start, date_end=range2_end, max_cloud=15)
+
+    if not scenes1:
+        scenes1 = await search_scenes(bbox, date_start=range1_start, date_end=range1_end, max_cloud=30)
+    if not scenes2:
+        scenes2 = await search_scenes(bbox, date_start=range2_start, date_end=range2_end, max_cloud=30)
+
+    if not scenes1 or not scenes2:
+        return {"error": f"未找到足够低云量的Sentinel-2影像覆盖两个时期({range1_start[:7]} / {range2_start[:7]})，请尝试其他月份"}
+
+    logger.info(f"[water_change] Period1: {scenes1[0]['date']} Period2: {scenes2[0]['date']}")
+    result = detect_water_change(bbox, scenes1[0], scenes2[0])
+    logger.info(f"[water_change] Done: {result['area1_km2']}->{result['area2_km2']}km2 ({result['change_pct']:+.1f}%)")
+    return result
+
+
 async def _simulate_flood_3d(bbox=None, location=None, rainfall_mm=100):
     import sys
     import numpy as np
@@ -1001,15 +1052,15 @@ async def _simulate_flood_3d(bbox=None, location=None, rainfall_mm=100):
     from flood_sim.engine import fetch_elevation_grid, simulate_flood_2d
     from segment.osm_buildings import fetch_osm_buildings, fetch_landuse, sample_cn_from_landuse
 
+    if location:
+        coord = await _geocode_city(location)
+        if coord:
+            cx, cy = coord
+            half = 0.015
+            bbox = [cx - half, cy - half, cx + half, cy + half]
+            logger.info(f"[flood_sim_3d] Geocoded '{location}' -> ({cx:.4f}, {cy:.4f})")
     if not bbox or len(bbox) != 4 or not all(isinstance(v, (int, float)) for v in bbox):
-        if location:
-            coord = await _geocode_city(location)
-            if coord:
-                cx, cy = coord
-                half = 0.015
-                bbox = [cx - half, cy - half, cx + half, cy + half]
-        if not bbox:
-            bbox = [105.72, 34.57, 105.75, 34.60]
+        bbox = [105.72, 34.57, 105.75, 34.60]
 
     logger.info(f"[flood_sim_3d] bbox={bbox} rainfall={rainfall_mm}mm")
 
@@ -1710,6 +1761,7 @@ GLM_TOOLS.extend([
     {"type": "function", "function": {"name": "water_monitor", "description": "遥感水体监测：自动下载Sentinel-2卫星影像(10m分辨率)，计算NDWI水体指数，提取河湖水库水体范围。输出GeoJSON水体多边形+面积统计+覆盖率。当用户要求水体监测/水体识别/河湖监测/水面面积/水体变化/水体提取/NDWI时调用。支持任意区域。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "地点名称，如'陇南'、'白龙江'、'天水'。"}}, "required": []}}},
     {"type": "function", "function": {"name": "flood_sim_3d", "description": "洪水淹没3D推演：自动获取地形高程+建筑轮廓，模拟降雨→径流→淹没过程，生成3D淹没动画(建筑逐栋被淹、水位上涨)。当用户要求洪水推演/淹没模拟/暴雨会不会淹/城市内涝模拟/3D洪水时调用。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "城市或地点名称，如'天水'、'陇南'。"}, "rainfall_mm": {"type": "number", "description": "降雨量(mm)，默认100", "default": 100}, "return_period": {"type": "string", "description": "重现期，如'50年一遇'、'100年一遇'，默认空"}}, "required": []}}},
     {"type": "function", "function": {"name": "drone_mission", "description": "无人机航线自主规划：基于洪水推演结果自动识别风险热点，生成最优巡查航点(TSP路径优化)，输出航线+航点+KML文件。当用户要求无人机巡查/航线规划/飞行计划/航拍规划/无人机巡检/drone时调用。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "城市或地点名称。"}, "mission_type": {"type": "string", "description": "任务类型: flood_inspect(洪水巡查), dam_inspect(堤坝巡检), search_rescue(搜救搜索), damage_assess(灾后评估)。默认flood_inspect。"}}, "required": []}}},
+    {"type": "function", "function": {"name": "water_change", "description": "多期遥感水体变化检测：自动下载两个时期的Sentinel-2卫星影像，分别提取水体，逐像素对比变化。输出扩展区域(红)/缩减区域(绿)/面积变化百分比。当用户要求水体变化检测/水面变化/河湖变化/水库面积变化/多期对比/时序变化时调用。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "地点名称，如'白龙江'、'陇南'。"}, "date1": {"type": "string", "description": "第一期对比月份，格式YYYY-MM，如'2024-06'。用户没说就留空。"}, "date2": {"type": "string", "description": "第二期对比月份，格式YYYY-MM，如'2024-10'。用户没说就留空。"}}, "required": []}}},
 ])
 
 TOOL_TO_SERVER["weather_forecast"] = "internal"
@@ -1722,6 +1774,7 @@ TOOL_TO_SERVER["building_extract"] = "internal"
 TOOL_TO_SERVER["water_monitor"] = "internal"
 TOOL_TO_SERVER["flood_sim_3d"] = "internal"
 TOOL_TO_SERVER["drone_mission"] = "internal"
+TOOL_TO_SERVER["water_change"] = "internal"
 
 ROUTING_RULES.extend([
     (r"天气预报|降雨预报|气象预报|查天气", "weather_forecast"),
@@ -1733,7 +1786,8 @@ ROUTING_RULES.extend([
     (r"无人机|航线|飞行计划|航拍|巡检|drone|uav|巡查航线|航线规划", "drone_mission"),
     (r"降水|降雨|雨量|面雨量|暴雨分析|precipitation|气象网格|降水监测|降水分析|降雨分析|降水分布|降雨分布|降水预报|降雨过程|降雨预报", "precipitation_grid"),
     (r"建筑识别|建筑提取|建筑物|建筑|房子识别|楼房|地物提取|卫星建筑|城市建模|建筑分割|building|建筑3D|建筑三维", "building_extract"),
-    (r"水体监测|水体识别|水体提取|河湖监测|水面面积|水体变化|NDWI|水体分析|遥感水体|水域监测|水库监测", "water_monitor"),
+    (r"水体变化检测|水面变化|河湖变化|水库面积变化|多期对比|时序变化|变化检测", "water_change"),
+    (r"水体监测|水体识别|水体提取|河湖监测|水面面积|NDWI|水体分析|遥感水体|水域监测|水库监测", "water_monitor"),
 ])
 
 
@@ -1862,6 +1916,8 @@ async def _handle_internal_tool(tool_name: str, args: dict, user_msg: str = "") 
         return await _extract_buildings(args.get("bbox"), args.get("location"))
     if tool_name == "water_monitor":
         return await _monitor_water(args.get("bbox"), args.get("location"))
+    if tool_name == "water_change":
+        return await _detect_water_change(args.get("bbox"), args.get("location"), args.get("date1", ""), args.get("date2", ""))
     if tool_name == "flood_sim_3d":
         return await _simulate_flood_3d(args.get("bbox"), args.get("location"), args.get("rainfall_mm", 100))
     if tool_name == "drone_mission":
