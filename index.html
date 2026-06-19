@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>S-AI · Spatial Intelligence for Water Resources</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+:root{--bg:#050810;--bg2:#080d1a;--bg3:#0c1224;--card:rgba(15,22,40,0.8);--glass:rgba(20,30,55,0.4);--border:rgba(0,212,255,0.12);--border2:rgba(255,255,255,0.05);--accent:#00d4ff;--accent2:#00ff88;--accent3:#a855f7;--accent4:#f472b6;--warn:#f59e0b;--danger:#ef4444;--text:#f0f5fa;--text2:#c0cee0;--dim:#5a6a82}
+*{margin:0;padding:0;box-sizing:border-box}html{scroll-behavior:smooth}body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.7;overflow-x:hidden}
+#particles{position:fixed;inset:0;z-index:-1;pointer-events:none}
+.bg-grad{position:fixed;inset:0;z-index:-2;background:radial-gradient(ellipse 60% 50% at 50% 0%,rgba(0,212,255,0.06),transparent),radial-gradient(ellipse 50% 40% at 20% 60%,rgba(168,85,247,0.04),transparent),radial-gradient(ellipse 40% 30% at 80% 40%,rgba(0,255,136,0.03),transparent),var(--bg)}
+.wrap{max-width:1000px;margin:0 auto;padding:0 24px}
+.hero{text-align:center;padding:100px 0 70px;position:relative}
+.hero-orb{position:absolute;top:20px;left:50%;transform:translateX(-50%);width:500px;height:400px;border-radius:50%;background:radial-gradient(circle,rgba(0,212,255,0.08),transparent 60%);filter:blur(60px);pointer-events:none;animation:float 6s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-20px)}}
+.hero-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 18px;border-radius:100px;background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.15);color:var(--accent);font-size:12px;font-weight:600;letter-spacing:1px;margin-bottom:28px;backdrop-filter:blur(10px)}
+.hero-badge .dot{width:7px;height:7px;border-radius:50%;background:var(--accent2);box-shadow:0 0 8px var(--accent2);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 8px var(--accent2)}50%{opacity:0.4;box-shadow:0 0 16px var(--accent2)}}
+.hero h1{font-family:'Space Grotesk',sans-serif;font-size:46px;font-weight:700;line-height:1.12;letter-spacing:-1.5px;color:#fff;margin-bottom:18px;max-width:850px;margin-inline:auto}
+.hero h1 .g1{background:linear-gradient(135deg,#00d4ff,#00ff88);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero h1 .g2{background:linear-gradient(135deg,#a855f7,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero .subtitle{font-size:17px;color:var(--text2);max-width:680px;margin:0 auto 28px;font-weight:300}
+.hero .authors{font-size:14px;color:var(--accent);font-weight:600}
+.hero .affil{font-size:12px;color:var(--dim);margin-top:2px}
+.hero-btns{display:flex;justify-content:center;gap:14px;margin-top:32px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:13px 30px;border-radius:12px;font-size:14px;font-weight:600;text-decoration:none;transition:all 0.3s;border:1px solid var(--border)}
+.btn-ghost{background:var(--glass);backdrop-filter:blur(10px);color:var(--accent)}
+.btn-ghost:hover{border-color:var(--accent);background:rgba(0,212,255,0.08);transform:translateY(-2px)}
+.btn-disabled{background:var(--bg3);color:var(--dim);cursor:not-allowed;opacity:0.5;border:1px solid var(--border2);position:relative}
+.btn-disabled .coming{position:absolute;top:-7px;right:-7px;font-size:8px;padding:2px 7px;border-radius:6px;background:var(--warn);color:#000;font-weight:800;letter-spacing:0.5px}
+.hero-stats{display:flex;justify-content:center;gap:40px;margin-top:44px;flex-wrap:wrap}
+.hero-stat .num{font-family:'JetBrains Mono',monospace;font-size:40px;font-weight:700;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;line-height:1}
+.hero-stat .label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:1.5px;margin-top:4px}
+.section{padding:64px 0}
+.stag{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:3px;margin-bottom:10px}
+.stitle{font-family:'Space Grotesk',sans-serif;font-size:30px;font-weight:700;color:#fff;margin-bottom:8px;letter-spacing:-0.5px}
+.sdesc{font-size:14px;color:var(--text2);margin-bottom:36px;max-width:680px;font-weight:300}
+.glass{background:var(--card);backdrop-filter:blur(16px);border:1px solid var(--border2);border-radius:18px}
+.abstract-card{padding:36px;position:relative;overflow:hidden;border:1px solid var(--border)}
+.abstract-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent3),var(--accent4))}
+.abstract-card h3{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:2px;margin-bottom:14px}
+.abstract-card p{font-size:14px;color:var(--text2);text-align:justify}
+.abstract-card b{color:var(--accent);font-weight:600}
+.formula{background:var(--bg2);border:1px solid var(--border2);border-radius:12px;padding:20px;margin:16px 0;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--accent2);overflow-x:auto}
+.formula .label{color:var(--dim);font-size:10px;margin-bottom:6px}
+.pl-step{display:flex;gap:16px;margin-bottom:6px}
+.pl-num{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;flex-shrink:0;font-size:15px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--accent);background:linear-gradient(135deg,rgba(0,212,255,0.12),rgba(0,255,136,0.06));border:1px solid rgba(0,212,255,0.18);position:relative;z-index:1}
+.pl-body{flex:1;padding:16px 22px;border:1px solid var(--border2);border-radius:14px;margin-bottom:8px;transition:all 0.3s}
+.pl-body:hover{border-color:var(--border);background:var(--bg3);transform:translateX(6px)}
+.pl-body h4{font-size:14px;font-weight:700;color:#fff}
+.pl-body h4 code{color:var(--accent);font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;margin-left:8px}
+.pl-body p{font-size:12px;color:var(--dim);margin-top:2px}
+.pl-line{width:2px;height:14px;background:linear-gradient(180deg,var(--border),transparent);margin-left:18px}
+.gallery{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+.g-item{position:relative;border-radius:16px;overflow:hidden;border:1px solid var(--border2);cursor:pointer;transition:all 0.4s}
+.g-item:hover{border-color:var(--accent);transform:translateY(-6px);box-shadow:0 16px 48px rgba(0,212,255,0.12)}
+.g-item img{width:100%;display:block;transition:transform 0.5s}
+.g-item:hover img{transform:scale(1.08)}
+.g-overlay{position:absolute;bottom:0;left:0;right:0;padding:18px;background:linear-gradient(transparent,rgba(5,8,16,0.97))}
+.g-overlay h4{font-size:13px;font-weight:700;color:#fff}
+.g-overlay p{font-size:11px;color:var(--accent);margin-top:2px}
+.g-zoom{position:absolute;top:12px;right:12px;width:36px;height:36px;border-radius:10px;background:rgba(0,0,0,0.4);backdrop-filter:blur(8px);display:grid;place-items:center;font-size:16px;opacity:0;transition:opacity 0.3s}
+.g-item:hover .g-zoom{opacity:1}
+.lightbox{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.95);display:none;align-items:center;justify-content:center;padding:40px}
+.lightbox.active{display:flex}
+.lightbox img{max-width:95%;max-height:90vh;border-radius:14px;box-shadow:0 24px 80px rgba(0,0,0,0.7)}
+.lightbox-close{position:fixed;top:20px;right:24px;width:44px;height:44px;border-radius:12px;background:rgba(255,255,255,0.08);border:none;color:#fff;font-size:20px;cursor:pointer}
+.demo-list{display:flex;flex-direction:column;gap:10px}
+.demo-item{display:flex;align-items:center;gap:14px;padding:16px 22px;border:1px solid var(--border2);border-radius:14px;transition:all 0.3s;background:var(--glass);backdrop-filter:blur(8px)}
+.demo-item:hover{border-color:var(--accent);background:var(--bg3);transform:translateX(4px)}
+.demo-icon{font-size:22px}
+.demo-text{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--accent2);flex:1}
+.demo-tag{font-size:10px;color:var(--dim);padding:3px 10px;border-radius:6px;background:var(--bg);border:1px solid var(--border2)}
+.cmp{width:100%;border-collapse:collapse}
+.cmp th{padding:14px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--dim);border-bottom:1px solid var(--border)}
+.cmp td{padding:14px 16px;font-size:13px;border-bottom:1px solid var(--border2)}
+.cmp .old{color:var(--danger)}.cmp .new{color:var(--accent2);font-weight:600}
+.arch{padding:24px;border:1px solid var(--border);border-radius:16px;margin:12px 0}
+.arch h4{font-size:13px;font-weight:700;margin-bottom:10px}
+.arch-tags{display:flex;flex-wrap:wrap;gap:8px}
+.atag{padding:5px 12px;border-radius:8px;font-size:11px;font-weight:500;background:var(--bg);border:1px solid var(--border2);color:var(--text2);transition:all 0.2s}
+.atag.hl{color:var(--accent);border-color:rgba(0,212,255,0.2)}
+.atag:hover{border-color:var(--accent)}
+.arch-arrow{text-align:center;color:var(--dim);margin:6px 0}
+.tgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.tcard{padding:18px;text-align:center;border:1px solid var(--border2);border-radius:12px;transition:all 0.3s}
+.tcard:hover{border-color:var(--accent);transform:translateY(-3px)}
+.tcard .tn{font-size:13px;font-weight:700;color:#fff}
+.tcard .td{font-size:10px;color:var(--dim);margin-top:2px}
+.fgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+.fcard{padding:26px;border:1px solid var(--border2);border-radius:16px;transition:all 0.4s;position:relative;overflow:hidden}
+.fcard::before{content:'';position:absolute;top:0;left:0;width:3px;height:0;background:var(--accent);transition:height 0.4s}
+.fcard:hover::before{height:100%}
+.fcard:hover{border-color:var(--border)}
+.ficon{font-size:30px;margin-bottom:14px}
+.fcard h4{font-size:15px;font-weight:700;color:#fff;margin-bottom:6px}
+.fcard p{font-size:12px;color:var(--text2)}
+.fcard .fstat{display:inline-block;margin-top:10px;padding:3px 10px;border-radius:6px;background:rgba(0,212,255,0.06);color:var(--accent);font-size:11px;font-family:'JetBrains Mono',monospace}
+.footer{text-align:center;padding:64px 0 48px;border-top:1px solid var(--border2)}
+.footer .flogo{font-family:'Space Grotesk',sans-serif;font-size:24px;font-weight:700;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.footer p{font-size:12px;color:var(--dim);margin:4px 0}
+.footer-links{display:flex;justify-content:center;gap:16px;margin:20px 0}
+@media(max-width:768px){
+  .hero h1{font-size:30px}
+  .hero .subtitle{font-size:14px}
+  .hero-badge{font-size:10px;padding:5px 14px}
+  .hero-btns{gap:10px}
+  .btn{padding:11px 22px;font-size:13px}
+  .hero-stats{gap:20px}
+  .hero-stat .num{font-size:28px}
+  .hero-stat .label{font-size:9px}
+  .gallery,.fgrid{grid-template-columns:1fr}
+  .tgrid{grid-template-columns:1fr 1fr}
+  .section{padding:40px 0}
+  .stitle{font-size:22px}
+  .sdesc{font-size:13px}
+  .wrap{padding:0 16px}
+  .hero{padding:60px 0 40px}
+  .pl-step{gap:10px}
+  .pl-num{width:32px;height:32px;font-size:13px}
+  .pl-body{padding:12px 14px}
+  .pl-body h4{font-size:13px}
+  .pl-body p{font-size:11px}
+  .formula{font-size:11px;padding:14px}
+  .cmp{font-size:12px}
+  .cmp td,.cmp th{padding:10px 8px}
+  .demo-item{padding:12px 14px;gap:8px}
+  .demo-text{font-size:11px}
+  .fcard{padding:20px}
+  .arch{padding:16px}
+  .arch-tags{gap:6px}
+  .atag{font-size:10px;padding:4px 8px}
+  .lightbox img{max-width:98%;max-height:80vh}
+  .lightbox-close{width:36px;height:36px;font-size:16px}
+  .g-overlay h4{font-size:12px}
+  .g-overlay p{font-size:10px}
+}
+@media(max-width:480px){
+  .hero h1{font-size:24px;letter-spacing:-0.5px}
+  .hero .subtitle{font-size:13px}
+  .hero-stats{gap:16px;flex-direction:column;align-items:center}
+  .hero-stat .num{font-size:24px}
+  .tgrid{grid-template-columns:1fr}
+  .gallery{gap:12px}
+  .g-zoom{width:30px;height:30px;font-size:13px}
+  .hero-btns{flex-direction:column;width:100%}
+  .btn{width:100%;justify-content:center}
+  .footer-links{flex-direction:column;width:100%}
+  .footer-links .btn{width:100%;justify-content:center}
+}
+</style>
+</head>
+<body>
+<canvas id="particles"></canvas>
+<div class="bg-grad"></div>
+<div class="wrap">
+
+<div class="hero">
+  <div class="hero-orb"></div>
+  <div class="hero-badge"><span class="dot"></span> SPATIAL INTELLIGENCE &middot; LLM-POWERED AUTONOMY</div>
+  <h1><span class="g1">S-AI</span>: Spatial Intelligence Platform<br>for <span class="g2">Water Resources Engineering</span></h1>
+  <p class="subtitle">From a single sentence to a full physics-based flood inundation assessment &mdash; distributed hydrology, 2D shallow water simulation, and per-building impact analysis &mdash; fully autonomous in <b>13 seconds</b>, with <b>zero API cost</b>.</p>
+  <div class="authors">Daochong Guo</div>
+  <div class="affil">LUOBIN-PI Research Lab &middot; Spatial Intelligence &amp; Hydroinformatics Division</div>
+  <div class="hero-btns">
+    <a class="btn btn-disabled">Read Paper<span class="coming">SOON</span></a>
+    <a class="btn btn-disabled">Source Code<span class="coming">SOON</span></a>
+    <a href="#features" class="btn btn-ghost">Explore Features &rarr;</a>
+  </div>
+  <div class="hero-stats">
+    <div class="hero-stat"><div class="num" data-target="42">0</div><div class="label">AI Tools</div></div>
+    <div class="hero-stat"><div class="num" data-target="8">0</div><div class="label">MCP Services</div></div>
+    <div class="hero-stat"><div class="num">13s</div><div class="label">Full Pipeline</div></div>
+    <div class="hero-stat"><div class="num">$0</div><div class="label">API Cost</div></div>
+  </div>
+</div>
+
+<div class="section" id="abstract">
+  <div class="stag">Abstract</div>
+  <div class="stitle">Making AI Truly Understand Hydrological Physics</div>
+  <div class="glass abstract-card">
+    <h3>Overview</h3>
+    <p>S-AI is a production-grade multi-agent spatial intelligence platform that federates <b>42+ specialized geospatial and hydrological tools</b> across eight MCP microservices, enabling natural language intent parsing that autonomously decomposes user queries into executable hydrodynamic workflows. The platform pioneers a <b>distributed hydrological modeling chain</b> that automates the complete pipeline from rainfall to building-level inundation assessment in under 15 seconds: SRTM 90m global DEM acquisition &rarr; D8 watershed delineation &rarr; <b>OSM land use-driven SCS-CN curve number assignment</b> (CN 55&#8211;98) &rarr; time-area flow routing &rarr; <b>Manning 2D shallow water inundation</b> &rarr; per-building impact assessment.<br><br>Empirical evaluation demonstrates that a single query &mdash; <i>&ldquo;Will Tianshui flood with 150mm/24h?&rdquo;</i> &mdash; triggers autonomous orchestration of <b>428 OSM land use polygons</b>, <b>1,174 building assessments</b>, distributed SCS-CN runoff generation (<b>71.7mm</b> from 150mm rainfall), peak discharge of <b>59.5 m&#179;/s</b>, and 2D inundation reaching <b>3.12m depth</b> over 56.9% of the analysis area &mdash; all on a single consumer GPU with zero API cost beyond LLM inference.</p>
+  </div>
+</div>
+
+<div class="section">
+  <div class="stag">Mathematical Foundation</div>
+  <div class="stitle">Physics-Based Modeling Core</div>
+  <div class="glass" style="padding:28px">
+    <div class="formula"><div class="label">SCS-CN Rainfall-Runoff Transform (distributed per grid cell)</div>Q = (P &#8722; I&#8336;)&#178; / (P &#8722; I&#8336; + S),&nbsp;&nbsp; S = 25400/CN &#8722; 254,&nbsp;&nbsp; I&#8336; = 0.2S</div>
+    <div class="formula"><div class="label">Manning Flow Velocity (time-area routing + 2D diffusion)</div>v = (1/n) &#183; h&#94;(2/3) &#183; S&#8337;&#94;(1/2),&nbsp;&nbsp; q = v &#183; h &#183; &#916;x / N_neighbors</div>
+    <div class="formula"><div class="label">Water Body Indices (Sentinel-2 multispectral)</div>NDWI = (B&#8323; &#8722; B&#8328;) / (B&#8323; + B&#8328;),&nbsp;&nbsp; MNDWI = (B&#8323; &#8722; B&#8321;&#8321;) / (B&#8323; + B&#8321;&#8321;)</div>
+    <div class="formula"><div class="label">D8 Flow Direction (watershed delineation)</div>flow[r,c] = argmax&#8328;&#8712;&#8328; {(z[r,c] &#8722; z[nr,nc]) / dist&#8321;}</div>
+  </div>
+</div>
+
+<div class="section" id="features">
+  <div class="stag">Core Capabilities</div>
+  <div class="stitle">Six AI-Powered Spatial Intelligence Modules</div>
+  <p class="sdesc">Each module starts from natural language, with AI autonomously orchestrating the full computational chain using free, globally available data sources.</p>
+  <div class="fgrid">
+    <div class="fcard"><div class="ficon">&#127754;</div><h4>Distributed Hydrology &times; 2D Hydrodynamics</h4><p>SRTM DEM &rarr; D8 watershed &rarr; OSM land use SCS-CN &rarr; time-area routing &rarr; Manning 2D shallow water &rarr; per-building impact</p><div class="fstat">13s &#183; 1174 buildings &#183; CN 55-98</div></div>
+    <div class="fcard"><div class="ficon">&#128736;</div><h4>Autonomous Drone Mission Planning</h4><p>Flood hotspots &rarr; TSP nearest-neighbor + 2-opt &rarr; waypoint optimization &rarr; KML export for DJI deployment</p><div class="fstat">10 waypoints &#183; 10.93km &#183; 22.8min</div></div>
+    <div class="fcard"><div class="ficon">&#128752;</div><h4>Multi-Temporal Water Body Change Detection</h4><p>Dual-period Sentinel-2 &rarr; MNDWI + Otsu auto-threshold &rarr; pixel-level diff &rarr; expansion/shrinkage GeoJSON</p><div class="fstat">+356.8% change &#183; MNDWI + Otsu</div></div>
+    <div class="fcard"><div class="ficon">&#127961;</div><h4>Intelligent Building Extraction</h4><p>OSM precise footprints + SAM fallback &rarr; 6-class taxonomy &rarr; satellite imagery overlay &rarr; SCS-CN land use fusion</p><div class="fstat">CN 55-98 &#183; 428 OSM polygons</div></div>
+    <div class="fcard"><div class="ficon">&#127783;</div><h4>ERA5-Land Precipitation Grid Animation</h4><p>9km hourly precipitation &rarr; animated heatmap &rarr; storm center tracking &rarr; reverse geocoded place names</p><div class="fstat">96 timesteps &#183; moving storm center</div></div>
+    <div class="fcard"><div class="ficon">&#9999;</div><h4>Map Draw &rarr; Instant Spatial Analysis</h4><p>Draw rectangle on map &rarr; auto bbox extraction &rarr; one-click flood / building / water / drone analysis trigger</p><div class="fstat">Zero typing &#183; visual-first UX</div></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="stag">Flood Pipeline</div>
+  <div class="stitle">8-Step Autonomous Flood Simulation</div>
+  <p class="sdesc">User asks &ldquo;Will Tianshui flood with 150mm/24h?&rdquo; &mdash; AI orchestrates the full physics-based pipeline in 13 seconds</p>
+  <div class="pl-step"><div class="pl-num">1</div><div class="pl-body glass"><h4>City Geocoding<code>46 cities + Nominatim</code></h4><p>Natural language &rarr; coordinates &rarr; analysis bbox (~3km&#178;)</p></div></div>
+  <div class="pl-line"></div>
+  <div class="pl-step"><div class="pl-num">2</div><div class="pl-body glass"><h4>SRTM Global DEM<code>Terrarium 90m &#183; AWS CloudFront</code></h4><p>rasterio COG windowed read &rarr; 106&#215;66 elevation grid (51m/px) &#183; 3-tier fallback</p></div></div>
+  <div class="pl-line"></div>
+  <div class="pl-step"><div class="pl-num">3</div><div class="pl-body glass"><h4>Watershed Delineation<code>D8 + Topological Sort</code></h4><p>8-neighbor steepest descent &rarr; BFS accumulation &rarr; stream network (367 cells, 15 nodes)</p></div></div>
+  <div class="pl-line"></div>
+  <div class="pl-step"><div class="pl-num">4</div><div class="pl-body glass"><h4>Distributed SCS-CN<code>OSM Land Use &#183; CN 55-98</code></h4><p>residential&#8594;85, commercial&#8594;92, forest&#8594;55 &rarr; Path rasterization &rarr; per-grid excess rainfall</p></div></div>
+  <div class="pl-line"></div>
+  <div class="pl-step"><div class="pl-num">5</div><div class="pl-body glass"><h4>Time-Area Routing<code>Manning velocity &#183; Travel time</code></h4><p>T = &#931;(d/v) &rarr; 30-bin histogram &rarr; rainfall &#215; histogram &rarr; outlet discharge Q(t) = 59.5 m&#179;/s</p></div></div>
+  <div class="pl-line"></div>
+  <div class="pl-step"><div class="pl-num">6</div><div class="pl-body glass"><h4>2D Shallow Water<code>Manning 8-neighbor diffusion</code></h4><p>v=(1/n)h&#94;(2/3)S&#94;(1/2) &rarr; 8-neighbor flux &rarr; mass conservation &rarr; 13 depth frames (peak 3.12m)</p></div></div>
+  <div class="pl-line"></div>
+  <div class="pl-step"><div class="pl-num">7</div><div class="pl-body glass"><h4>Building Impact<code>OSM &#215; DEM &#215; Peak Depth</code></h4><p>1,174 footprints &rarr; safe/partial/submerged &rarr; flooded floor estimation</p></div></div>
+  <div class="pl-line"></div>
+  <div class="pl-step"><div class="pl-num">8</div><div class="pl-body glass"><h4>Visualization<code>Heatmap + Hydrograph + Timeline</code></h4><p>Animated depth grid + satellite overlay + stats panel + KML export</p></div></div>
+</div>
+
+<div class="section">
+  <div class="stag">System Showcase</div>
+  <div class="stitle">Real Data, Real Results</div>
+  <p class="sdesc">All visualizations based on real satellite data (SRTM + OSM + Sentinel-2 + ERA5-Land) &mdash; click any image to enlarge</p>
+  <div class="gallery">
+    <div class="g-item" onclick="openLightbox('flood.jpg')"><div class="g-zoom">&#128269;</div><img src="flood.jpg"><div class="g-overlay"><h4>Distributed Hydro &times; 2D Hydrodynamic</h4><p>Depth heatmap + building animation + discharge hydrograph</p></div></div>
+    <div class="g-item" onclick="openLightbox('building.jpg')"><div class="g-zoom">&#128269;</div><img src="building.jpg"><div class="g-overlay"><h4>OSM Building Extraction</h4><p>Satellite imagery + 6-class taxonomy + type legend</p></div></div>
+    <div class="g-item" onclick="openLightbox('qpf.jpg')"><div class="g-zoom">&#128269;</div><img src="qpf.jpg"><div class="g-overlay"><h4>ERA5-Land Precipitation Grid</h4><p>Animated heatmap + moving storm center + hydrograph</p></div></div>
+    <div class="g-item" onclick="openLightbox('UAV.png')"><div class="g-zoom">&#128269;</div><img src="UAV.png"><div class="g-overlay"><h4>Autonomous Drone Planning</h4><p>TSP-optimized route + risk waypoints + KML export</p></div></div>
+    <div class="g-item" onclick="openLightbox('water.jpg')"><div class="g-zoom">&#128269;</div><img src="water.jpg"><div class="g-overlay"><h4>Remote Sensing Water Monitoring</h4><p>Sentinel-2 MNDWI + multi-temporal change detection</p></div></div>
+    <div class="g-item" onclick="openLightbox('3D.jpg')"><div class="g-zoom">&#128269;</div><img src="3D.jpg"><div class="g-overlay"><h4>AI 3D Reconstruction</h4><p>TripoSR single-photo 3D + Three.js viewer</p></div></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="stag">Natural Language Interface</div>
+  <div class="stitle">One Sentence Awakens Full Pipeline</div>
+  <div class="demo-list">
+    <div class="demo-item glass"><span class="demo-icon">&#127754;</span><span class="demo-text">&ldquo;Will Tianshui flood with 150mm rain in 24 hours?&rdquo;</span><span class="demo-tag">flood_sim_3d</span></div>
+    <div class="demo-item glass"><span class="demo-icon">&#127961;</span><span class="demo-text">&ldquo;Identify buildings in Tianshui city center&rdquo;</span><span class="demo-tag">building_extract</span></div>
+    <div class="demo-item glass"><span class="demo-icon">&#127783;</span><span class="demo-text">&ldquo;Show 3-day rainfall forecast for Chifeng&rdquo;</span><span class="demo-tag">precipitation_grid</span></div>
+    <div class="demo-item glass"><span class="demo-icon">&#128736;</span><span class="demo-text">&ldquo;Plan drone inspection route for Tianshui flood zones&rdquo;</span><span class="demo-tag">drone_mission</span></div>
+    <div class="demo-item glass"><span class="demo-icon">&#128752;</span><span class="demo-text">&ldquo;Compare Bailong River water body: June vs October 2024&rdquo;</span><span class="demo-tag">water_change</span></div>
+    <div class="demo-item glass"><span class="demo-icon">&#9999;</span><span class="demo-text">[Draw rectangle on map] &#8594; click &ldquo;Flood analysis&rdquo;</span><span class="demo-tag">map_draw</span></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="stag">Comparison</div>
+  <div class="stitle">Traditional Workflow vs S-AI</div>
+  <table class="cmp">
+    <tr><th>Dimension</th><th>Traditional (HEC-HMS + HEC-RAS + ArcGIS)</th><th>S-AI</th></tr>
+    <tr><td>Setup time</td><td class="old">9+ hours expert work</td><td class="new">13&#8211;18 seconds</td></tr>
+    <tr><td>Software stack</td><td class="old">3&#8211;5 separate applications</td><td class="new">Single integrated platform</td></tr>
+    <tr><td>CN assignment</td><td class="old">Manual land use mapping</td><td class="new">OSM auto-rasterization</td></tr>
+    <tr><td>Building impact</td><td class="old">Manual GIS overlay</td><td class="new">Per-building auto-sampling</td></tr>
+    <tr><td>Drone planning</td><td class="old">Separate mission planner</td><td class="new">AI TSP + KML export</td></tr>
+    <tr><td>DEM data</td><td class="old">Manual download + preprocessing</td><td class="new">SRTM auto-fetch (free)</td></tr>
+    <tr><td>Cost</td><td class="old">Licenses + HPC + expert time</td><td class="new">Free data + consumer GPU</td></tr>
+  </table>
+</div>
+
+<div class="section">
+  <div class="stag">Architecture</div>
+  <div class="stitle">Three-Layer System Design</div>
+  <div class="arch glass"><h4 style="color:var(--accent2)">Frontend &mdash; Vue 3 (Port 5173)</h4><div class="arch-tags"><span class="atag hl">Leaflet Dark</span><span class="atag hl">Three.js 3D</span><span class="atag hl">SSE Streaming</span><span class="atag hl">Draw-to-Analyze</span><span class="atag">Vite 8 &#183; TypeScript &#183; TailwindCSS &#183; Pinia</span><span class="atag">24+ render strategies</span></div></div>
+  <div class="arch-arrow">&#8597;</div>
+  <div class="arch glass"><h4 style="color:var(--accent)">Orchestration &mdash; FastAPI (Port 3000)</h4><div class="arch-tags"><span class="atag hl">ReAct 8-step</span><span class="atag hl">3-layer routing</span><span class="atag hl">Debate validation</span><span class="atag hl">Auto-tool gen</span><span class="atag">Circuit breaker &#183; LRU cache &#183; Full tracing</span><span class="atag">46-city geocoding &#183; Flood cache</span></div></div>
+  <div class="arch-arrow">&#8597;</div>
+  <div class="arch glass"><h4 style="color:var(--accent3)">AI Modules + MCP Services (Ports 5001-5007)</h4><div class="arch-tags"><span class="atag hl">TripoSR 3D</span><span class="atag hl">SAM + OSM</span><span class="atag hl">Sentinel-2 MNDWI</span><span class="atag hl">ERA5-Land</span><span class="atag hl">Distributed Hydro</span><span class="atag hl">Manning 2D</span><span class="atag hl">Drone TSP</span><span class="atag hl">SRTM COG</span><span class="atag">GIS &#183; Data &#183; Knowledge &#183; Map &#183; Hydro &#183; Flood &#183; Raster</span></div></div>
+</div>
+
+<div class="section">
+  <div class="stag">Technology Stack</div>
+  <div class="stitle">Built With Modern Tools</div>
+  <div class="tgrid">
+    <div class="tcard glass"><div class="tn">LLM Agent</div><div class="td">ReAct reasoning</div></div>
+    <div class="tcard glass"><div class="tn">MCP Protocol</div><div class="td">Tool federation</div></div>
+    <div class="tcard glass"><div class="tn">FastAPI</div><div class="td">Async backend</div></div>
+    <div class="tcard glass"><div class="tn">Vue 3 + Vite</div><div class="td">Reactive UI</div></div>
+    <div class="tcard glass"><div class="tn">Leaflet</div><div class="td">Map + draw</div></div>
+    <div class="tcard glass"><div class="tn">Three.js</div><div class="td">3D shaders</div></div>
+    <div class="tcard glass"><div class="tn">SRTM COG</div><div class="td">Global DEM</div></div>
+    <div class="tcard glass"><div class="tn">Sentinel-2</div><div class="td">10m imagery</div></div>
+    <div class="tcard glass"><div class="tn">OSM</div><div class="td">Buildings + LU</div></div>
+    <div class="tcard glass"><div class="tn">ERA5-Land</div><div class="td">9km precip</div></div>
+    <div class="tcard glass"><div class="tn">TripoSR + SAM</div><div class="td">AI vision</div></div>
+    <div class="tcard glass"><div class="tn">PyTorch</div><div class="td">Deep learning</div></div>
+  </div>
+</div>
+
+<div class="footer">
+  <div class="flogo">S-AI</div>
+  <p>Making spatial intelligence accessible to everyone</p>
+  <div class="footer-links">
+    <a class="btn btn-disabled">Source Code<span class="coming">SOON</span></a>
+    <a class="btn btn-disabled">Paper<span class="coming">SOON</span></a>
+  </div>
+  <p>Built by <b>LUOBIN-PI Research Lab</b> &#183; MIT License</p>
+</div>
+
+</div>
+<div class="lightbox" id="lightbox" onclick="closeLightbox()"><button class="lightbox-close">&#10005;</button><img id="lb-img"></div>
+<script>
+var cv=document.getElementById('particles'),cx=cv.getContext('2d'),pts=[];
+function rsz(){cv.width=innerWidth;cv.height=innerHeight;pts=[];for(var i=0;i<50;i++)pts.push({x:Math.random()*cv.width,y:Math.random()*cv.height,vx:(Math.random()-0.5)*0.3,vy:(Math.random()-0.5)*0.3,r:Math.random()*1.5+0.5})}
+rsz();addEventListener('resize',rsz);
+function anim(){cx.clearRect(0,0,cv.width,cv.height);pts.forEach(function(p){p.x+=p.vx;p.y+=p.vy;if(p.x<0||p.x>cv.width)p.vx*=-1;if(p.y<0||p.y>cv.height)p.vy*=-1;cx.beginPath();cx.arc(p.x,p.y,p.r,0,7);cx.fillStyle='rgba(0,212,255,'+(p.r/3*0.3)+')';cx.fill()});for(var i=0;i<pts.length;i++)for(var j=i+1;j<pts.length;j++){var dx=pts[i].x-pts[j].x,dy=pts[i].y-pts[j].y,d=Math.sqrt(dx*dx+dy*dy);if(d<120){cx.beginPath();cx.moveTo(pts[i].x,pts[i].y);cx.lineTo(pts[j].x,pts[j].y);cx.strokeStyle='rgba(0,212,255,'+(0.08*(1-d/120))+')';cx.lineWidth=0.5;cx.stroke()}}requestAnimationFrame(anim)}anim();
+function openLightbox(s){document.getElementById('lb-img').src=s;document.getElementById('lightbox').classList.add('active')}
+function closeLightbox(){document.getElementById('lightbox').classList.remove('active')}
+addEventListener('keydown',function(e){if(e.key==='Escape')closeLightbox()});
+var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.style.opacity='1';e.target.style.transform='translateY(0)'}})},{threshold:0.1});
+document.querySelectorAll('.section').forEach(function(e){e.style.opacity='0';e.style.transform='translateY(30px)';e.style.transition='opacity 0.7s, transform 0.7s';io.observe(e)});
+document.querySelectorAll('[data-target]').forEach(function(el){var t=parseInt(el.dataset.target),c=0,s=Math.ceil(t/25),tm=setInterval(function(){c+=s;if(c>=t){c=t;clearInterval(tm)}el.textContent=c},40)});
+</script>
+</body>
+</html>
