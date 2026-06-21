@@ -7,6 +7,10 @@
   <img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge">
 </p>
 
+<p align="center">
+  <a href="https://guodaochong.github.io/s-ai/"><strong>🌐 项目主页 / Project Homepage</strong></a>
+</p>
+
 
 <h1 align="center">
   S-AI · 水利空间智能体平台
