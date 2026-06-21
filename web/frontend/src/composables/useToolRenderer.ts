@@ -1031,6 +1031,15 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
           }, 800)
         }
       }
+
+      setTimeout(() => {
+        const f3dBtn = document.querySelector('#f3d-btn') as HTMLButtonElement
+        if (f3dBtn) {
+          f3dBtn.addEventListener('click', () => {
+            ;(window as any).__openFlood3D(r)
+          })
+        }
+      }, 200)
     })
 
     const safe = stats.safe || 0
@@ -1052,6 +1061,9 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
         </div>
         ${hydrograph}
         <div class="tr-sub" style="margin-top:4px">🏗️ ${safe}✅ / ${partial}⚠️ / ${submerged}❌ | 📍动画+流量过程线已加载</div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button class="tr-recon-btn primary" id="f3d-btn">🎬 3D灾难片视图</button>
+        </div>
       </div>`
     return { html, mapActions: actions }
   },
@@ -1788,5 +1800,188 @@ function _injectBuildingCss() {
 }
 `
   document.head.appendChild(style)
+}
+
+;(window as any).__openFlood3D = function(r: any) {
+  if (!r) return
+  const bbox = r.bbox || []
+  const impacts = r.building_impacts || []
+  const depthFrames = r.depth_frames || []
+  const gridLats = r.grid_lats || []
+  const gridLons = r.grid_lons || []
+  const stats = r.stats || {}
+
+  if (!bbox.length) { alert('No bbox data'); return }
+
+  const cx = (bbox[0] + bbox[2]) / 2
+  const cy = (bbox[1] + bbox[3]) / 2
+  const spanLon = bbox[2] - bbox[0]
+  const spanLat = bbox[3] - bbox[1]
+  const scale = 100
+
+  function project(lon: number, lat: number): [number, number] {
+    return [((lon - cx) / spanLon) * scale, ((lat - cy) / spanLat) * scale]
+  }
+
+  const overlay = document.createElement('div')
+  overlay.id = 'flood3d-overlay'
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#000;display:flex;flex-direction:column'
+  overlay.innerHTML = `
+    <div style="position:absolute;top:0;left:0;right:0;padding:12px 20px;background:rgba(0,0,0,0.6);backdrop-filter:blur(10px);z-index:10;display:flex;align-items:center;gap:16px">
+      <span style="color:#00d4ff;font-weight:700;font-size:14px">🎬 3D Flood Visualization</span>
+      <span style="color:#64748b;font-size:11px">${impacts.length} buildings | ${depthFrames.length} frames | ${(stats.peak_depth_m||0).toFixed(1)}m peak</span>
+      <button id="f3d-close" style="margin-left:auto;padding:6px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:#fff;cursor:pointer;font-size:12px">✕ Close</button>
+    </div>
+    <div id="f3d-canvas" style="flex:1;position:relative"></div>
+    <div style="position:absolute;bottom:0;left:0;right:0;padding:12px 20px;background:rgba(0,0,0,0.7);backdrop-filter:blur(10px);z-index:10;display:flex;align-items:center;gap:12px">
+      <button id="f3d-play" style="width:36px;height:36px;border-radius:50%;border:none;background:#00d4ff;color:#000;font-size:16px;cursor:pointer;display:grid;place-items:center">▶</button>
+      <span id="f3d-time" style="color:#e2e8f0;font-size:12px;min-width:80px;font-family:monospace">0.0h</span>
+      <input id="f3d-slider" type="range" min="0" max="${depthFrames.length-1}" value="0" style="flex:1;accent-color:#00d4ff">
+      <span id="f3d-info" style="color:#64748b;font-size:11px;font-family:monospace"></span>
+    </div>
+  `
+  document.body.appendChild(overlay)
+
+  overlay.querySelector('#f3d-close')!.addEventListener('click', () => overlay.remove())
+
+  import('three').then((THREE: any) => {
+    import('three/addons/controls/OrbitControls.js').then(({ OrbitControls: OC }: any) => {
+      const container = overlay.querySelector('#f3d-canvas') as HTMLElement
+      const w = container.clientWidth || window.innerWidth
+      const h = container.clientHeight || window.innerHeight
+
+      const scene = new THREE.Scene()
+      scene.background = new THREE.Color(0x0a0e1a)
+      scene.fog = new THREE.Fog(0x0a0e1a, 80, 250)
+
+      const camera = new THREE.PerspectiveCamera(50, w/h, 0.1, 500)
+      camera.position.set(80, 100, 120)
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true })
+      renderer.setSize(w, h)
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+      renderer.shadowMap.enabled = true
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap
+      container.appendChild(renderer.domElement)
+
+      const controls = new OC(camera, renderer.domElement)
+      controls.enableDamping = true
+      controls.dampingFactor = 0.08
+      controls.maxPolarAngle = Math.PI / 2.1
+      controls.autoRotate = true
+      controls.autoRotateSpeed = 0.5
+
+      const ambient = new THREE.AmbientLight(0x4060a0, 0.6)
+      scene.add(ambient)
+      const dir = new THREE.DirectionalLight(0xffffff, 0.8)
+      dir.position.set(50, 80, 30)
+      dir.castShadow = true
+      dir.shadow.mapSize.set(1024, 1024)
+      dir.shadow.camera.left = -100; dir.shadow.camera.right = 100
+      dir.shadow.camera.top = 100; dir.shadow.camera.bottom = -100
+      scene.add(dir)
+
+      const groundGeo = new THREE.PlaneGeometry(scale*1.5, scale*1.5)
+      const groundMat = new THREE.MeshStandardMaterial({ color: 0x1a2a1a, roughness: 0.9 })
+      const ground = new THREE.Mesh(groundGeo, groundMat)
+      ground.rotation.x = -Math.PI / 2
+      ground.receiveShadow = true
+      scene.add(ground)
+
+      const elevMin = (r.elev_range || [1000, 1100])[0]
+      const elevMax = (r.elev_range || [1000, 1100])[1]
+      const elevScale = 15 / Math.max(elevMax - elevMin, 1)
+
+      impacts.slice(0, 800).forEach((b: any) => {
+        const center = b.center || [0, 0]
+        if (!center[0]) return
+        const [px, pz] = project(center[0], center[1])
+        const bh = Math.max((b.height_m || 6) * 0.3, 0.5)
+        const elevH = ((b.elevation_m || elevMin) - elevMin) * elevScale
+        const bw = Math.max(1.5, 1.5)
+        const geo = new THREE.BoxGeometry(bw, bh, bw)
+        let color = 0x22c55e
+        if (b.flood_status === 'submerged') color = 0xef4444
+        else if (b.flood_status === 'partial') color = 0xf59e0b
+        const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.1 })
+        const mesh = new THREE.Mesh(geo, mat)
+        mesh.position.set(px, elevH + bh/2, pz)
+        mesh.castShadow = true
+        mesh.receiveShadow = true
+        scene.add(mesh)
+      })
+
+      let waterMesh: any = null
+      if (depthFrames.length && gridLats.length && gridLons.length) {
+        const gn = Math.min(gridLats.length, 50)
+        const gm = Math.min(gridLons.length, 50)
+        const waterGeo = new THREE.PlaneGeometry(scale*1.2, scale*1.2, gm-1, gn-1)
+        const waterMat = new THREE.MeshStandardMaterial({
+          color: 0x0080ff, transparent: true, opacity: 0.65,
+          roughness: 0.1, metalness: 0.3, side: THREE.DoubleSide,
+        })
+        waterMesh = new THREE.Mesh(waterGeo, waterMat)
+        waterMesh.rotation.x = -Math.PI / 2
+        scene.add(waterMesh)
+      }
+
+      let curFrame = 0
+      let playing = true
+
+      function updateWater(frameIdx: number) {
+        if (!waterMesh || !depthFrames.length) return
+        const frame = depthFrames[frameIdx] || depthFrames[depthFrames.length - 1]
+        const positions = waterMesh.geometry.attributes.position
+        const gn = frame.length
+        const gm = frame[0]?.length || 0
+        for (let i = 0; i < positions.count; i++) {
+          const row = Math.floor(i / gm)
+          const col = i % gm
+          let d = 0
+          if (row < gn && col < gm) d = frame[row]?.[col] || 0
+          positions.setY(i, d * 10)
+        }
+        positions.needsUpdate = true
+        waterMesh.geometry.computeVertexNormals()
+
+        const sps = r.stats_per_step || []
+        const sp = sps[frameIdx] || {}
+        const timeEl = overlay.querySelector('#f3d-time')
+        const infoEl = overlay.querySelector('#f3d-info')
+        if (timeEl) timeEl.textContent = `${sp.time_h || 0}h`
+        if (infoEl) infoEl.textContent = `${(sp.max_depth_m||0).toFixed(2)}m | ${(sp.flooded_pct||0)}% | Q=${(sp.discharge_cms||0)}`
+      }
+
+      updateWater(0)
+
+      const slider = overlay.querySelector('#f3d-slider') as HTMLInputElement
+      const playBtn = overlay.querySelector('#f3d-play') as HTMLButtonElement
+      slider?.addEventListener('input', () => {
+        curFrame = parseInt(slider.value); playing = false; playBtn.textContent = '▶'; updateWater(curFrame)
+      })
+      playBtn?.addEventListener('click', () => { playing = !playing; playBtn.textContent = playing ? '⏸' : '▶' })
+
+      let animId = 0
+      function animate() {
+        animId = requestAnimationFrame(animate)
+        controls.update()
+        if (playing && depthFrames.length > 1) {
+          curFrame = (curFrame + 0.03) % depthFrames.length
+          slider.value = String(Math.floor(curFrame))
+          updateWater(Math.floor(curFrame))
+        }
+        if (waterMesh) {
+          const t = Date.now() * 0.001
+          waterMesh.material.opacity = 0.5 + Math.sin(t * 2) * 0.12
+        }
+        renderer.render(scene, camera)
+      }
+      animate()
+
+      overlay.querySelector('#f3d-close')!.addEventListener('click', () => {
+        cancelAnimationFrame(animId); renderer.dispose()
+      })
+    })
+  })
 }
 
