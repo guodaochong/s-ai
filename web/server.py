@@ -220,6 +220,8 @@ def _compress_result(tool: str, result: dict) -> str:
         return f"无人机航线: {result.get('n_waypoints','?')}航点 {result.get('total_distance_km','?')}km {result.get('estimated_flight_min','?')}min"
     if tool == "water_change":
         return f"水体变化: {result.get('area1_km2','?')}→{result.get('area2_km2','?')}km² ({result.get('change_pct','?'):+.1f}%) {result.get('date1','?')}~{result.get('date2','?')}"
+    if tool == "multi_agent_debate":
+        return f"多智能体辩论: {result.get('n_agents','?')}位专家 {result.get('rounds','?')}轮讨论 已达成共识"
     return json.dumps(result, ensure_ascii=False)[:200]
 
 
@@ -235,7 +237,7 @@ async def _call_llm(messages: list[dict], model: str = MODEL_FLASH, use_tools: b
         payload["tools"] = GLM_TOOLS
         payload["tool_choice"] = "auto"
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(GLM_API_URL, headers=headers, json=payload)
         resp.raise_for_status()
         data = resp.json()
@@ -297,7 +299,7 @@ _route_cache: dict[str, str] = {}
 _ROUTE_CACHE_MAX = 200
 
 
-_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool,reconstruct_3d,precipitation_grid,building_extract,water_monitor,flood_sim_3d,drone_mission,water_change".split(",")
+_ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,auto_tool,reconstruct_3d,precipitation_grid,building_extract,water_monitor,flood_sim_3d,drone_mission,water_change,multi_agent_debate".split(",")
 
 _ROUTE_SYSTEM = """你是路由模块。只回复工具名或SIMPLE。
 
@@ -744,7 +746,7 @@ async def _fetch_precipitation_grid(
     )
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             raw = resp.json()
@@ -1042,6 +1044,17 @@ async def _detect_water_change(bbox=None, location=None, date1="", date2=""):
     logger.info(f"[water_change] Period1: {scenes1[0]['date']} Period2: {scenes2[0]['date']}")
     result = detect_water_change(bbox, scenes1[0], scenes2[0])
     logger.info(f"[water_change] Done: {result['area1_km2']}->{result['area2_km2']}km2 ({result['change_pct']:+.1f}%)")
+    return result
+
+
+async def _run_multi_agent_debate(scenario: str):
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent))
+    from multi_agent.engine import run_multi_agent_debate
+
+    logger.info(f"[debate] Starting multi-agent debate: {scenario[:80]}")
+    result = await run_multi_agent_debate(_call_llm, scenario, rounds=3)
+    logger.info(f"[debate] Done: {result['n_agents']} agents, {result['rounds']} rounds")
     return result
 
 
@@ -1762,6 +1775,7 @@ GLM_TOOLS.extend([
     {"type": "function", "function": {"name": "flood_sim_3d", "description": "洪水淹没3D推演：自动获取地形高程+建筑轮廓，模拟降雨→径流→淹没过程，生成3D淹没动画(建筑逐栋被淹、水位上涨)。当用户要求洪水推演/淹没模拟/暴雨会不会淹/城市内涝模拟/3D洪水时调用。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "城市或地点名称，如'天水'、'陇南'。"}, "rainfall_mm": {"type": "number", "description": "降雨量(mm)，默认100", "default": 100}, "return_period": {"type": "string", "description": "重现期，如'50年一遇'、'100年一遇'，默认空"}}, "required": []}}},
     {"type": "function", "function": {"name": "drone_mission", "description": "无人机航线自主规划：基于洪水推演结果自动识别风险热点，生成最优巡查航点(TSP路径优化)，输出航线+航点+KML文件。当用户要求无人机巡查/航线规划/飞行计划/航拍规划/无人机巡检/drone时调用。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "城市或地点名称。"}, "mission_type": {"type": "string", "description": "任务类型: flood_inspect(洪水巡查), dam_inspect(堤坝巡检), search_rescue(搜救搜索), damage_assess(灾后评估)。默认flood_inspect。"}}, "required": []}}},
     {"type": "function", "function": {"name": "water_change", "description": "多期遥感水体变化检测：自动下载两个时期的Sentinel-2卫星影像，分别提取水体，逐像素对比变化。输出扩展区域(红)/缩减区域(绿)/面积变化百分比。当用户要求水体变化检测/水面变化/河湖变化/水库面积变化/多期对比/时序变化时调用。", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围。仅当用户给出明确数值坐标时才填，否则留空。禁止编造坐标。", "items": {"type": "number"}}, "location": {"type": "string", "description": "地点名称，如'白龙江'、'陇南'。"}, "date1": {"type": "string", "description": "第一期对比月份，格式YYYY-MM，如'2024-06'。用户没说就留空。"}, "date2": {"type": "string", "description": "第二期对比月份，格式YYYY-MM，如'2024-10'。用户没说就留空。"}}, "required": []}}},
+    {"type": "function", "function": {"name": "multi_agent_debate", "description": "多智能体协作辩论：三位AI专家(水文学家/结构工程师/应急指挥官)独立分析同一场景，互相质疑辩论，最终达成共识，输出联合风险评估报告。当用户要求多专家分析/综合评估/风险评估报告/专家会诊/协作辩论/会商时调用。", "parameters": {"type": "object", "properties": {"scenario": {"type": "string", "description": "要分析的场景描述，如'天水暴雨150mm的应对方案'。"}}, "required": ["scenario"]}}},
 ])
 
 TOOL_TO_SERVER["weather_forecast"] = "internal"
@@ -1775,6 +1789,7 @@ TOOL_TO_SERVER["water_monitor"] = "internal"
 TOOL_TO_SERVER["flood_sim_3d"] = "internal"
 TOOL_TO_SERVER["drone_mission"] = "internal"
 TOOL_TO_SERVER["water_change"] = "internal"
+TOOL_TO_SERVER["multi_agent_debate"] = "internal"
 
 ROUTING_RULES.extend([
     (r"天气预报|降雨预报|气象预报|查天气", "weather_forecast"),
@@ -1783,6 +1798,7 @@ ROUTING_RULES.extend([
     (r"散点插值|插值|griddata|IDW|克里金|Kriging|反距离|空间插值", "scatter_interpolate"),
     (r"3D|三维|3d|重建|reconstruct|建模|立体", "reconstruct_3d"),
     (r"洪水推演|淹没模拟|暴雨.*淹|城市内涝|3D洪水|洪水3D|内涝模拟|会不会淹|淹没3D|洪水动画|内涝|涨水", "flood_sim_3d"),
+    (r"多智能体|专家会诊|多专家|协作辩论|联合分析|风险评估报告|综合分析|专家讨论|会商", "multi_agent_debate"),
     (r"无人机|航线|飞行计划|航拍|巡检|drone|uav|巡查航线|航线规划", "drone_mission"),
     (r"降水|降雨|雨量|面雨量|暴雨分析|precipitation|气象网格|降水监测|降水分析|降雨分析|降水分布|降雨分布|降水预报|降雨过程|降雨预报", "precipitation_grid"),
     (r"建筑识别|建筑提取|建筑物|建筑|房子识别|楼房|地物提取|卫星建筑|城市建模|建筑分割|building|建筑3D|建筑三维", "building_extract"),
@@ -1918,6 +1934,8 @@ async def _handle_internal_tool(tool_name: str, args: dict, user_msg: str = "") 
         return await _monitor_water(args.get("bbox"), args.get("location"))
     if tool_name == "water_change":
         return await _detect_water_change(args.get("bbox"), args.get("location"), args.get("date1", ""), args.get("date2", ""))
+    if tool_name == "multi_agent_debate":
+        return await _run_multi_agent_debate(args.get("scenario", ""))
     if tool_name == "flood_sim_3d":
         return await _simulate_flood_3d(args.get("bbox"), args.get("location"), args.get("rainfall_mm", 100))
     if tool_name == "drone_mission":

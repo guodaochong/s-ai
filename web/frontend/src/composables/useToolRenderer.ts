@@ -1341,6 +1341,68 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
       </div>`
     return { html, mapActions: actions }
   },
+
+  multi_agent_debate(r, ms) {
+    if (!r.multi_agent_debate) return { html: '', mapActions: [] }
+
+    function mdToHtml(text: string): string {
+      let h = esc(text)
+      h = h.replace(/\*\*(.+?)\*\*/g, '<b style="color:#fff">$1</b>')
+      h = h.replace(/^\d+\.\s+(.+)$/gm, '<div style="margin-left:12px">• $1</div>')
+      h = h.replace(/^[-•]\s+(.+)$/gm, '<div style="margin-left:12px">• $1</div>')
+      h = h.replace(/^###\s+(.+)$/gm, '<b style="color:#00d4ff;font-size:12px;margin-top:6px;display:block">$1</b>')
+      h = h.replace(/\n/g, '<br>')
+      return h
+    }
+
+    const log = r.debate_log || []
+    const consensus = r.consensus || ''
+    const agents = r.agents || []
+    const rounds = r.rounds || 0
+
+    let debateHtml = ''
+    for (let rd = 1; rd <= rounds; rd++) {
+      const roundEntries = log.filter((e: any) => e.round === rd)
+      if (!roundEntries.length) continue
+      const roundLabel = rd === 1 ? 'Independent Analysis' : `Round ${rd} Debate`
+      debateHtml += `<div style="margin-top:14px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="font-size:10px;color:#5a6a82;text-transform:uppercase;letter-spacing:1px">${roundLabel}</span></div>`
+      roundEntries.forEach((e: any) => {
+        const agentIcon = e.icon || '🗣'
+        const agentName = e.name || ''
+        const agentColor = e.color || '#00d4ff'
+        const isInitial = e.type === 'initial'
+        const tagLabel = isInitial ? 'Initial' : 'Rebuttal'
+        debateHtml += `<div style="margin:8px 0;padding:12px 16px;background:rgba(15,22,40,0.6);border-left:3px solid ${agentColor};border-radius:0 8px 8px 0">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+            <span style="font-size:16px">${agentIcon}</span>
+            <b style="color:${agentColor};font-size:12px">${agentName}</b>
+            <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,0.06);color:#5a6a82">${tagLabel}</span>
+          </div>
+          <div style="font-size:12px;color:#b4c2d4;line-height:1.7">${mdToHtml(e.content || '')}</div>
+        </div>`
+      })
+    }
+
+    let consensusHtml = ''
+    if (consensus) {
+      consensusHtml = `<div style="margin-top:16px;padding:20px;background:linear-gradient(135deg,rgba(0,212,255,0.06),rgba(0,255,136,0.04));border:1px solid rgba(0,212,255,0.15);border-radius:12px">
+        <div style="font-size:13px;font-weight:700;color:#00d4ff;margin-bottom:10px">🤝 Consensus Report</div>
+        <div style="font-size:12px;color:#c0cee0;line-height:1.8">${mdToHtml(consensus)}</div>
+      </div>`
+    }
+
+    const html = `
+      <div class="tr-recon-card">
+        <div class="tr-recon-header" style="color:#a855f7">🧠 Multi-Agent Collaborative Debate</div>
+        <div style="font-size:10px;color:#64748b;margin-bottom:8px">
+          ${agents.map((a: any) => `${a.icon} ${a.name}`).join(' · ')} | ${rounds} rounds
+        </div>
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Scenario: ${esc(r.context || '')}</div>
+        ${debateHtml}
+        ${consensusHtml}
+      </div>`
+    return { html, mapActions: [] }
+  },
 }
 
 /* ── Generic renderer (fallback) ── */
