@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.auth import AuthMiddleware
-from app.routes import data, files, reconstruct, system, tracing
+from app.routes import conversations, data, files, reconstruct, system, tracing
 from app.streaming import router as chat_router
 
 __author__ = "jumpingbirds"
@@ -42,7 +42,7 @@ def create_app() -> FastAPI:
     app.add_middleware(AuthMiddleware)
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
-    for r in (system, files, data, tracing, reconstruct):
+    for r in (system, files, data, tracing, reconstruct, conversations):
         app.include_router(r.router)
     app.include_router(chat_router)
 
