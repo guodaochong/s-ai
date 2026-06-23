@@ -478,12 +478,18 @@ export const useThreeStore = defineStore('three', () => {
     terrainMesh = null; waterMesh = null
   }
 
+  function clearHydro() {
+    hydroFrames.value = []
+    hydroIdx.value = 0
+    hydroPlaying.value = false
+  }
+
   return {
     show3D, waterLevel, waterLabel,
     hydroFrames, hydroIdx, hydroPlaying, hydroSpeedVal,
     hydroInfo, hydroTimeLabel,
     init3D, toggle3D, stopAnimation, setWaterLevel, handleResize, dispose,
     buildTinMesh3D, buildHydroFrame3D,
-    hydroSeek, hydroPlayToggle, setHydroSpeed, loadHydroSimulation,
+    hydroSeek, hydroPlayToggle, setHydroSpeed, loadHydroSimulation, clearHydro,
   }
 })

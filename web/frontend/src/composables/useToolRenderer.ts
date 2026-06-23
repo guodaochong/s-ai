@@ -851,6 +851,9 @@ const STRATEGIES: Record<string, (r: any, ms: ReturnType<typeof useMapStore>) =>
       const panel = container.closest('.map-panel') || container.parentElement
       ;(panel as any)?.querySelector?.('#flood-stats-panel')?.remove?.()
       ;(panel as any)?.querySelector?.('#flood-timeline')?.remove?.()
+      ;(panel as any)?.querySelector?.('#precip-timeline')?.remove?.()
+      if ((map as any)._precip_timer) clearInterval((map as any)._precip_timer)
+      ;(map as any)._precip_layers?.forEach((l: any) => map.removeLayer(l))
       if ((map as any)._flood_timer) clearInterval((map as any)._flood_timer)
 
       const satLayer = L.tileLayer(
