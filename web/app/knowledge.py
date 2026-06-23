@@ -203,15 +203,14 @@ async def fetch_precipitation_grid(
 ) -> dict:
     from datetime import datetime, timedelta
 
+    if location:
+        coord = await geocode_city(location)
+        if coord:
+            cx, cy = coord
+            half = 1.0
+            bbox = [cx - half, cy - half, cx + half, cy + half]
     if not bbox or len(bbox) < 4:
-        if location:
-            coord = await geocode_city(location)
-            if coord:
-                cx, cy = coord
-                half = 0.4
-                bbox = [cx - half, cy - half, cx + half, cy + half]
-        if not bbox:
-            bbox = [104.5, 33.0, 105.3, 33.5]
+        bbox = [104.5, 33.0, 105.3, 33.5]
     west, south, east, north = bbox[0], bbox[1], bbox[2], bbox[3]
 
     min_span = 0.5
