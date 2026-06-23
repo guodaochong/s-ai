@@ -65,6 +65,18 @@ export function useSSE() {
         chatStore.setChainSuggestions(data.suggestions)
       }
     },
+    pipeline_start: (data) => {
+      chatStore.pipelineName = data.name || ''
+      chatStore.pipelineSteps = data.steps || []
+      chatStore.pipelineActive = true
+    },
+    pipeline_step: (data) => {
+      const step = chatStore.pipelineSteps.find((s: any) => s.id === data.step_id)
+      if (step) step.status = data.status || 'pending'
+    },
+    pipeline_done: () => {
+      chatStore.pipelineActive = false
+    },
     text: (data) => {
       chatStore.updateLastBotMessage(data.content || '')
     },

@@ -21,6 +21,9 @@ export const useChatStore = defineStore('chat', () => {
   const pendingDrawMessage = ref<string>('')
   const events = ref<{ agent: string; action: string; detail: string }[]>([])
   const eventCount = ref(0)
+  const pipelineName = ref('')
+  const pipelineSteps = ref<{ id: number; tool: string; label: string; icon: string; status: string }[]>([])
+  const pipelineActive = ref(false)
 
   const recentHistory = computed(() => history.value.slice(-10))
 
@@ -131,6 +134,9 @@ export const useChatStore = defineStore('chat', () => {
     toolStatuses.value = []
     dividers.value = []
     chainSuggestions.value = []
+    pipelineName.value = ''
+    pipelineSteps.value = []
+    pipelineActive.value = false
     totalTools.value = 0
     totalMs.value = 0
   }
@@ -166,6 +172,7 @@ export const useChatStore = defineStore('chat', () => {
     toolStatuses, dividers, chainSuggestions,
     totalTools, totalMs,
     lastExportData, allExportData, events, eventCount,
+    pipelineName, pipelineSteps, pipelineActive,
     recentHistory,
     addUserMessage, addBotMessage, updateLastBotMessage,
     addThinkingLine, startThinking, closeThinking, markThinkingDone, clearThinking,

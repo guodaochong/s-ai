@@ -300,6 +300,28 @@ function closeExportMenu(e: MouseEvent) {
       </div>
     </div>
 
+    <div v-if="chatStore.pipelineSteps.length > 0" class="pipeline-dag">
+      <div class="pd-header">
+        <span>{{ chatStore.pipelineName }}</span>
+        <span class="pd-pct">{{ Math.round((chatStore.pipelineSteps.filter(s => s.status === 'done').length + chatStore.pipelineSteps.filter(s => s.status === 'running').length * 0.5) / chatStore.pipelineSteps.length * 100) }}%</span>
+      </div>
+      <div class="pd-bar-track">
+        <div class="pd-bar-fill" :style="{ width: (chatStore.pipelineSteps.filter(s => s.status === 'done').length + chatStore.pipelineSteps.filter(s => s.status === 'running').length * 0.5) / chatStore.pipelineSteps.length * 100 + '%' }"></div>
+      </div>
+      <div class="pd-nodes">
+        <template v-for="(step, si) in chatStore.pipelineSteps" :key="'pl_'+si">
+          <div :class="['pd-node', step.status]">
+            <span class="pd-icon">{{ step.icon }}</span>
+            <span class="pd-label">{{ step.label }}</span>
+            <span class="pd-status">{{
+              step.status === 'done' ? '✅' : step.status === 'running' ? '🔄' : step.status === 'error' ? '❌' : '⏳'
+            }}</span>
+          </div>
+          <span v-if="si < chatStore.pipelineSteps.length - 1" class="pd-arrow">→</span>
+        </template>
+      </div>
+    </div>
+
     <div class="suggestions">
       <span
         v-for="s in suggestions" :key="s"
@@ -627,6 +649,78 @@ function closeExportMenu(e: MouseEvent) {
   background: rgba(124, 58, 237, .25);
   border-color: rgba(124, 58, 237, .5);
 }
+
+.pipeline-dag {
+  margin: 8px 0;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 212, 255, .15);
+  background: rgba(0, 212, 255, .04);
+}
+.pd-header {
+  font-size: 13px;
+  font-weight: 700;
+  color: #67e8f9;
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.pd-pct {
+  font-size: 14px;
+  font-weight: 800;
+  color: #4ade80;
+  font-variant-numeric: tabular-nums;
+}
+.pd-bar-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255,255,255,.06);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.pd-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #22d3ee, #4ade80);
+  transition: width .5s ease;
+}
+.pd-nodes {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.pd-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.03);
+  min-width: 72px;
+  transition: all .3s;
+}
+.pd-node.running {
+  border-color: rgba(250, 204, 21, .5);
+  background: rgba(250, 204, 21, .08);
+  box-shadow: 0 0 12px rgba(250, 204, 21, .15);
+}
+.pd-node.done {
+  border-color: rgba(74, 222, 128, .4);
+  background: rgba(74, 222, 128, .06);
+}
+.pd-node.error {
+  border-color: rgba(248, 113, 113, .4);
+  background: rgba(248, 113, 113, .06);
+}
+.pd-icon { font-size: 20px; }
+.pd-label { font-size: 11px; color: #cbd5e1; }
+.pd-status { font-size: 13px; }
+.pd-arrow { color: rgba(255,255,255,.2); font-size: 14px; }
 .th-line.done { color: var(--accent3); }
 .tool-badge {
   display: inline-flex;
