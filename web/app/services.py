@@ -13,30 +13,6 @@ from app.utils import bbox_overlap
 from app.knowledge import geocode_city
 
 
-WORLD_MODEL_RULES = {
-    "flood": {"max_velocity": "5m/s", "max_depth": "10m", "min_slope": "0.0001"},
-    "drainage": {"min_pipe_slope": "0.001", "max_velocity": "5m/s", "min_diameter": "0.3m"},
-    "hydrology": {"min_cn": "30", "max_cn": "100", "rational_C_range": "0.1-0.95"},
-}
-
-
-def get_world_model_rules(scenario: str) -> list[str]:
-    rules = WORLD_MODEL_RULES.get(scenario, {})
-    return [f"{k}: {v}" for k, v in rules.items()]
-
-
-def validate_sim_params(params: dict, sim_type: str) -> dict:
-    checks = []
-    if sim_type == "hydrodynamic":
-        if "duration_hours" in params:
-            h = params["duration_hours"]
-            checks.append({"param": "duration_hours", "valid": 0 < h <= 72, "warning": "" if 0 < h <= 72 else f"模拟时长{h}h超出合理范围"})
-        if "grid_resolution_m" in params:
-            r = params["grid_resolution_m"]
-            checks.append({"param": "grid_resolution_m", "valid": 0.5 <= r <= 100, "warning": "" if 0.5 <= r <= 100 else f"网格分辨率{r}m不合理"})
-    return {"sim_type": sim_type, "checks": checks, "all_valid": all(c["valid"] for c in checks)}
-
-
 
 
 
@@ -252,7 +228,8 @@ async def simulate_flood_3d(bbox=None, location=None, rainfall_mm=100):
 
     try:
         buildings = await fetch_osm_buildings(bbox)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[flood_sim_3d] OSM buildings fetch failed: {e}")
         buildings = []
 
     osm_cn_grid = None

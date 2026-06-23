@@ -127,8 +127,8 @@ async def debate_validate(query: str, tool_name: str, tool_result: dict) -> dict
             match = re.search(r'\{[^}]+\}', content)
             if match:
                 return json.loads(match.group()) | {"role": role}
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("[Validators] debate_validate LLM call failed", role=role, error=str(exc)[:200])
         return {"pass": True, "score": 7, "role": role}
 
     DEBATE_PROMPTS = {

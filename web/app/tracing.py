@@ -67,12 +67,9 @@ twin = DigitalTwinBridge()
 
 
 _evolution_log: list[dict] = []
-_evolution_counter = 0
 
 
-def log_routing(query: str, layer: str, tool: str, was_correct: bool):
-    global _evolution_counter
-    _evolution_counter += 1
+def _log_evolution(query: str, layer: str, tool: str, was_correct: bool):
     _evolution_log.append({"query": query[:100], "layer": layer, "tool": tool, "correct": was_correct, "ts": time.time()})
     if len(_evolution_log) > 1000:
         _evolution_log[:] = _evolution_log[-500:]

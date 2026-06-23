@@ -1,65 +1,18 @@
+"""Utility functions — SSE formatting, result compression, context trimming, GeoJSON helpers.
+
+Author: jumpingbirds <guodaochong@gmail.com>
+"""
+
 from __future__ import annotations
 
 import json
 import math
-import re
 
 import numpy as np
-import structlog
-
-from app.config import AGENT_LABELS, TOOL_TO_SERVER, logger
 
 
 def sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
-
-
-def parse_text_tool_calls(content: str) -> list[dict]:
-    if not content or len(content) < 10:
-        return []
-    results = []
-
-    for m in re.finditer(r'(?:</?tool_calling>|</?tool_call>|</?function_call>)\s*(\{[^}]+\})', content, re.DOTALL):
-        try:
-            obj = json.loads(m.group(1))
-            name = obj.get("name", "")
-            args = obj.get("arguments", {})
-            if name and isinstance(args, dict):
-                results.append({"id": f"tc_text_{len(results)}", "type": "function", "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)}})
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    for m in re.finditer(r'\{[^{}]*"name"\s*:\s*"(\w+)"\s*,\s*"arguments"\s*:\s*(\{[^{}]*\})\s*\}', content):
-        name = m.group(1)
-        try:
-            args = json.loads(m.group(2))
-            results.append({"id": f"tc_text_{len(results)}", "type": "function", "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)}})
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    for m in re.finditer(r'\{"name"\s*:\s*"(\w+)"\s*,\s*"arguments"\s*:\s*(\{.*?\})\s*\}', content, re.DOTALL):
-        name = m.group(1)
-        if any(r["function"]["name"] == name for r in results):
-            continue
-        try:
-            args = json.loads(m.group(2))
-            results.append({"id": f"tc_text_{len(results)}", "type": "function", "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)}})
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    _BUILTIN = {"print", "json", "str", "int", "float", "dict", "list", "len", "range", "type", "set", "tuple", "abs", "max", "min", "sum", "round", "sorted", "map", "filter", "open", "True", "False", "None", "def", "class", "return", "if", "for", "while", "with", "import", "from"}
-    for m in re.finditer(r'(\w+)\s*\(\s*(\{[^}]*\})\s*\)', content):
-        name = m.group(1)
-        if name in _BUILTIN or any(r["function"]["name"] == name for r in results):
-            continue
-        try:
-            args = json.loads(m.group(2))
-            if isinstance(args, dict):
-                results.append({"id": f"tc_text_{len(results)}", "type": "function", "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)}})
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    return results
 
 
 def detect_ui_action(msg: str) -> str:
@@ -168,124 +121,10 @@ def format_tool_summary(server: str, tool: str, result: dict | list) -> str:
     return f"[{tool}] 完成"
 
 
-def get_chain_suggestions(tool: str) -> list[dict]:
-    chains = {
-        "point_query": [{"tool": "dem_analyze", "reason": "扩展地形分析"}],
-        "dem_analyze": [{"tool": "render_map", "reason": "渲染地形图"}],
-        "flood_inundation_map": [{"tool": "flood_assessment", "reason": "洪水风险评估"}],
-        "design_storm": [{"tool": "runoff_compute", "reason": "径流计算"}, {"tool": "flood_inundation_map", "reason": "淹没分析"}],
-        "runoff_compute": [{"tool": "flood_assessment", "reason": "洪水评估"}],
-        "terrain_profile": [{"tool": "render_map", "reason": "渲染剖面图"}],
-    }
-    return chains.get(tool, [])
-
-
 def bbox_overlap(a: list[float], b: list[float]) -> bool:
     if not a or not b or len(a) != 4 or len(b) != 4:
         return False
     return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
-
-
-def fix_polygon_coords(rings):
-    if not rings:
-        return None
-    fixed_rings = []
-    for ring in rings:
-        if not isinstance(ring, list):
-            return None
-        fixed_ring = []
-        for pt in ring:
-            if not isinstance(pt, (list, tuple)) or len(pt) < 2:
-                return None
-            try:
-                lon = float(pt[0])
-                lat = float(pt[1])
-            except (TypeError, ValueError):
-                return None
-            if not (math.isfinite(lon) and math.isfinite(lat)):
-                return None
-            if abs(lon) > 180 or abs(lat) > 90:
-                return None
-            fixed_ring.append([lon, lat])
-        if len(fixed_ring) < 3:
-            return None
-        if fixed_ring[0] != fixed_ring[-1]:
-            fixed_ring.append(fixed_ring[0])
-        fixed_rings.append(fixed_ring)
-    return fixed_rings if fixed_rings else None
-
-
-def fix_line_coords(lines):
-    if not lines:
-        return None
-    if isinstance(lines[0], (int, float)):
-        pts = lines
-        fixed = []
-        for pt in pts:
-            try:
-                v = float(pt)
-            except (TypeError, ValueError):
-                return None
-            if not math.isfinite(v):
-                return None
-            fixed.append([v])
-        return fixed
-    fixed_lines = []
-    for line in lines:
-        if not isinstance(line, list):
-            return None
-        fixed = []
-        for pt in line:
-            if not isinstance(pt, (list, tuple)) or len(pt) < 2:
-                return None
-            try:
-                lon = float(pt[0])
-                lat = float(pt[1])
-            except (TypeError, ValueError):
-                return None
-            if not (math.isfinite(lon) and math.isfinite(lat)):
-                return None
-            fixed.append([lon, lat])
-        if len(fixed) >= 2:
-            fixed_lines.append(fixed)
-    return fixed_lines if fixed_lines else None
-
-
-def sanitize_geojson_result(result: dict) -> dict | None:
-    if not isinstance(result, dict) or "geojson" not in result:
-        return None
-    gj = result["geojson"]
-    if not isinstance(gj, dict) or "features" not in gj:
-        return None
-    cleaned_features = []
-    for f in gj["features"]:
-        if not isinstance(f, dict) or "geometry" not in f:
-            cleaned_features.append(f)
-            continue
-        geom = f["geometry"]
-        gtype = geom.get("type", "")
-        coords = geom.get("coordinates")
-        if gtype in ("Polygon", "MultiPolygon") and coords:
-            try:
-                fixed = fix_polygon_coords(coords)
-                if fixed:
-                    geom["coordinates"] = fixed
-                    cleaned_features.append(f)
-            except Exception:
-                pass
-        elif gtype in ("LineString", "MultiLineString") and coords:
-            try:
-                fixed = fix_line_coords(coords)
-                if fixed:
-                    geom["coordinates"] = fixed
-                    cleaned_features.append(f)
-            except Exception:
-                pass
-        else:
-            cleaned_features.append(f)
-    gj["features"] = cleaned_features
-    result["geojson"] = gj
-    return result
 
 
 def normalize_auto_tool_result(result: dict) -> dict:
@@ -321,8 +160,93 @@ def nativefy(obj):
         return int(obj)
     if isinstance(obj, (np.floating,)):
         return float(obj)
-    if isinstance(obj, np.ndarray):
+    if isinstance(obj, (np.ndarray,)):
         return nativefy(obj.tolist())
-    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
-        return 0.0
     return obj
+
+
+def fix_polygon_coords(rings):
+    """Validate and fix GeoJSON polygon coordinates (close rings, reject NaN/out-of-range)."""
+    if not rings:
+        return None
+    fixed_rings = []
+    for ring in rings:
+        if not isinstance(ring, list):
+            return None
+        fixed_ring = []
+        for pt in ring:
+            if not isinstance(pt, (list, tuple)) or len(pt) < 2:
+                return None
+            try:
+                lon, lat = float(pt[0]), float(pt[1])
+            except (TypeError, ValueError):
+                return None
+            if not (math.isfinite(lon) and math.isfinite(lat)):
+                return None
+            if abs(lon) > 180 or abs(lat) > 90:
+                return None
+            fixed_ring.append([lon, lat])
+        if len(fixed_ring) < 3:
+            return None
+        if fixed_ring[0] != fixed_ring[-1]:
+            fixed_ring.append(fixed_ring[0])
+        fixed_rings.append(fixed_ring)
+    return fixed_rings if fixed_rings else None
+
+
+def fix_line_coords(lines):
+    """Validate and fix GeoJSON line string coordinates."""
+    if not lines:
+        return None
+    if isinstance(lines[0], (int, float)):
+        return [[float(v)] for v in lines if math.isfinite(float(v))]
+    fixed_lines = []
+    for line in lines:
+        if not isinstance(line, list):
+            return None
+        fixed = []
+        for pt in line:
+            if not isinstance(pt, (list, tuple)) or len(pt) < 2:
+                return None
+            try:
+                lon, lat = float(pt[0]), float(pt[1])
+            except (TypeError, ValueError):
+                return None
+            if not (math.isfinite(lon) and math.isfinite(lat)):
+                return None
+            fixed.append([lon, lat])
+        if len(fixed) >= 2:
+            fixed_lines.append(fixed)
+    return fixed_lines if fixed_lines else None
+
+
+def sanitize_geojson_result(result: dict) -> dict | None:
+    """Clean GeoJSON in a tool result dict — fix coordinates, drop invalid features."""
+    if not isinstance(result, dict) or "geojson" not in result:
+        return None
+    gj = result["geojson"]
+    if not isinstance(gj, dict) or "features" not in gj:
+        return None
+    cleaned_features = []
+    for f in gj["features"]:
+        if not isinstance(f, dict) or "geometry" not in f:
+            cleaned_features.append(f)
+            continue
+        geom = f["geometry"]
+        gtype = geom.get("type", "")
+        coords = geom.get("coordinates")
+        if gtype in ("Polygon", "MultiPolygon") and coords:
+            fixed = fix_polygon_coords(coords)
+            if fixed:
+                geom["coordinates"] = fixed
+                cleaned_features.append(f)
+        elif gtype in ("LineString", "MultiLineString") and coords:
+            fixed = fix_line_coords(coords)
+            if fixed:
+                geom["coordinates"] = fixed
+                cleaned_features.append(f)
+        else:
+            cleaned_features.append(f)
+    gj["features"] = cleaned_features
+    result["geojson"] = gj
+    return result

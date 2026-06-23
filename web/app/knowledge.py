@@ -187,8 +187,8 @@ async def geocode_city(name: str) -> tuple[float, float] | None:
             data = resp.json()
             if data:
                 return float(data[0]["lon"]), float(data[0]["lat"])
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("[Knowledge] geocode failed", city=name, error=str(exc)[:200])
     return None
 
 
@@ -358,8 +358,12 @@ async def fetch_precipitation_grid(
                 parts = [addr.get("village"), addr.get("town"), addr.get("county")]
                 place = "·".join([p for p in parts if p]) or addr.get("county", "")
                 peak_sc["place"] = place
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "[Knowledge] reverse geocode failed",
+                lat=peak_sc["lat"], lon=peak_sc["lon"],
+                error=str(exc)[:200],
+            )
 
     peak_grid_idx = precip_matrix[peak_idx].index(max(precip_matrix[peak_idx])) if precip_matrix[peak_idx] else 0
     peak_lat = grid_lats[peak_grid_idx] if peak_grid_idx < len(grid_lats) else 0

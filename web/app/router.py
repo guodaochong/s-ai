@@ -20,7 +20,7 @@ _COMPUTE_FAST = re.compile(
 _COMPUTE_OVERRIDE_EXEMPT = frozenset({
     "flood_sim_3d", "flood_inundation_map", "flood_assessment",
     "hydrodynamic_2d_sim", "design_storm", "dem_analyze",
-    "explain_concept", "search", "rag_search", "get_standard",
+    "explain_concept", "search", "get_standard",
     "render_map", "satellite_search", "precipitation_grid",
     "reconstruct_3d", "drone_mission", "water_monitor", "water_change",
     "building_extract", "multi_agent_debate",

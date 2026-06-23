@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import os
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -26,7 +27,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         auth_header = request.headers.get("Authorization", "")
         api_key_header = request.headers.get("X-API-Key", "")
 
-        if auth_header == f"Bearer {API_KEY}" or api_key_header == API_KEY:
+        if hmac.compare_digest(auth_header, f"Bearer {API_KEY}") or hmac.compare_digest(api_key_header, API_KEY):
             return await call_next(request)
 
         return JSONResponse({"error": "Unauthorized", "hint": "Set Authorization: Bearer <key> or X-API-Key header"}, status_code=401)
