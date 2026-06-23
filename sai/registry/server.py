@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from sai.config import settings
 from sai.registry.router import CapabilityRouter
 from sai.registry.store import AgentRegistration, RegistryStore
 
@@ -45,7 +46,7 @@ class RouteRequest(BaseModel):
 async def lifespan(app: FastAPI):
     global redis_client, store, router, cleanup_task
 
-    redis_client = aioredis.from_url("redis://localhost:6379/0", decode_responses=True)
+    redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
     store = RegistryStore(redis_client)
     router = CapabilityRouter(store)
 

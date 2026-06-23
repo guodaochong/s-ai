@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import time
@@ -50,7 +51,6 @@ async def call_mcp_tool(server: str, tool: str, args: dict, retries: int = 2) ->
             last_err = str(e)[:200]
             logger.error("[MCP] call_tool failed", server=server, tool=tool, attempt=attempt, elapsed_ms=int(elapsed * 1000), error=f"{type(e).__name__}: {last_err}")
             if attempt < retries:
-                import asyncio
                 await asyncio.sleep(0.5 * (attempt + 1))
     return {"error": last_err}
 

@@ -36,6 +36,8 @@ async def render_map(
     width: int = 1200,
     height: int = 800,
 ) -> dict[str, Any]:
+    width = max(100, min(width, 4000))
+    height = max(100, min(height, 4000))
     fig, ax = plt.subplots(1, 1, figsize=(width / 100, height / 100))
 
     for layer in layers:

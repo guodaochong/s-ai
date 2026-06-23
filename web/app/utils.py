@@ -85,8 +85,6 @@ def trim_context(messages: list[dict]) -> list[dict]:
             cut = len(c) - 400
             rest[i] = {**m, "content": c[:400] + f"\n...[截断{cut}字符]"}
             removed += cut
-        if not removed:
-            break
     result = [system, *rest] if system else rest
     cleaned = [result[0]] if result and result[0].get("role") == "system" else []
     source = result[1:] if cleaned else result

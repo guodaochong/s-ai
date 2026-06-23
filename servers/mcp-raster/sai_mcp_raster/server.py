@@ -1244,8 +1244,8 @@ async def scatter_interpolate(
         png_data = sig + _png_chunk(b"IHDR", ihdr) + _png_chunk(b"IDAT", compressed) + _png_chunk(b"IEND", b"")
         stats["image_base64"] = base64.b64encode(png_data).decode("ascii")
         stats["bounds"] = [float(y_min - margin_y), float(x_min - margin_x), float(y_max + margin_y), float(x_max + margin_x)]
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("[Raster] PNG image generation failed", error=str(exc)[:200])
     return stats
 
 

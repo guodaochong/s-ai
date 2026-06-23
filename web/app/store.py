@@ -17,6 +17,7 @@ class MemoryStore:
 
     def _init_db(self):
         with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS episodes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,7 +67,7 @@ class MemoryStore:
     def recall_facts(self, query: str = "", limit: int = 5) -> list[dict]:
         words = re.findall(r"[\u4e00-\u9fff\w]{2,}", query)
         with sqlite3.connect(str(self.db_path)) as conn:
-            rows = conn.execute("SELECT key,value,source FROM facts").fetchall()
+            rows = conn.execute("SELECT key,value,source FROM facts LIMIT 500").fetchall()
         results = []
         for r in rows:
             score = sum(2 if w in r[0] else (1 if w in r[1] else 0) for w in words)
@@ -107,6 +108,7 @@ class ConversationStore:
 
     def _init_db(self):
         with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS conversations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

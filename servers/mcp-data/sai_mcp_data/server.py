@@ -128,8 +128,8 @@ def _extract_bounds(data: dict[str, Any]) -> list[float] | None:
             bounds[1] = min(bounds[1], b[1])
             bounds[2] = max(bounds[2], b[2])
             bounds[3] = max(bounds[3], b[3])
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("[Data] geometry bounds extraction failed", error=str(exc)[:200])
     return bounds if bounds[0] != float("inf") else None
 
 

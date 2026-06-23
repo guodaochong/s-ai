@@ -121,8 +121,8 @@ async def flood_inundation_map(
             w = min(win_half * 2, ds.width - x0)
             h = min(win_half * 2, ds.height - y0)
             win = Window(x0, y0, w, h)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("[Flood] windowed read failed, falling back to full dataset", error=str(exc)[:200])
         out_h = min(800, win.height if win else ds.height)
         out_w = min(800, win.width if win else ds.width)
         if win:

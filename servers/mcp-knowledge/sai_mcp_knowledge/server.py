@@ -50,6 +50,8 @@ async def search(query: str, top_k: int = 5, filter: dict[str, Any] | None = Non
 
 
 async def get_parameter(parameter_name: str, conditions: dict[str, Any] | None = None) -> dict[str, Any]:
+    if "/" in parameter_name or "\\" in parameter_name or ".." in parameter_name:
+        return {"error": "Invalid parameter name"}
     param_file = PARAM_TABLES / f"{parameter_name}.json"
     if not param_file.exists():
         return {"error": f"Parameter table not found: {parameter_name}", "available": [p.stem for p in PARAM_TABLES.glob("*.json")]}
