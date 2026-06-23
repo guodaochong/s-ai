@@ -15,6 +15,21 @@ from mcp.types import TextContent, Tool
 
 logger = structlog.get_logger(__name__)
 
+_CITY_COORDS = {
+    "北京": (116.4074, 39.9042), "上海": (121.4737, 31.2304), "成都": (104.0657, 30.5723),
+    "天水": (105.7249, 34.5809), "兰州": (103.8343, 36.0611), "西安": (108.9398, 34.3416),
+    "陇南": (104.9219, 33.3886), "赤峰": (118.8889, 42.2576), "重庆": (106.5516, 29.5630),
+    "武汉": (114.3055, 30.5928), "郑州": (113.6253, 34.7466), "太原": (112.5489, 37.8706),
+    "沈阳": (123.4290, 41.7969), "哈尔滨": (126.5358, 45.8023), "天津": (117.1901, 39.1252),
+}
+
+
+async def _geocode(name: str) -> tuple[float, float] | None:
+    for k, (lon, lat) in _CITY_COORDS.items():
+        if k in name:
+            return lon, lat
+    return None
+
 DEM_DIR = Path(__file__).parent.parent.parent.parent / "data"
 REAL_DEM = DEM_DIR / "LBH_DEM_v2_0.5m_EPSG4544.tif"
 SYNTHETIC_DEM = DEM_DIR / "dem_beijing.npy"
@@ -28,6 +43,35 @@ def _find_dem(dem_path: str = "") -> str:
     if REAL_DEM.exists():
         return str(REAL_DEM)
     return ""
+
+
+async def _fetch_elevation_grid(lat: float, lon: float, half_deg: float = 0.05, grid: int = 8) -> dict[str, Any]:
+    """Fetch an elevation grid from Open-Meteo API for a given center point."""
+    import numpy as np
+    import httpx
+
+    step = (2 * half_deg) / max(grid - 1, 1)
+    lats = [round(lat - half_deg + i * step, 4) for i in range(grid)]
+    lons = [round(lon - half_deg + j * step, 4) for j in range(grid)]
+
+    lat_list: list[str] = []
+    lon_list: list[str] = []
+    for i in range(grid):
+        for j in range(grid):
+            lat_list.append(str(lats[i]))
+            lon_list.append(str(lons[j]))
+
+    url = "https://api.open-meteo.com/v1/elevation"
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(url, params={"latitude": ",".join(lat_list), "longitude": ",".join(lon_list)})
+        resp.raise_for_status()
+        elevations = resp.json().get("elevation", [])
+
+    if len(elevations) != grid * grid:
+        return {"error": f"Expected {grid*grid} points, got {len(elevations)}"}
+
+    dem = np.array(elevations, dtype=np.float32).reshape(grid, grid)
+    return {"dem": dem, "grid_lats": lats, "grid_lons": lons, "grid_size": grid, "center": [lat, lon]}
 
 
 def _sample_window(ds, max_px: int = SAMPLE_MAX):
@@ -50,11 +94,56 @@ async def dem_analyze(
     compute_slope: bool = True,
     compute_aspect: bool = True,
     compute_flowdir: bool = True,
+    location: str = "",
 ) -> dict[str, Any]:
     import numpy as np
 
     path = _find_dem(dem_path)
     result: dict[str, Any] = {"dem_path": path or "none"}
+
+    if not path and location:
+        coord = await _geocode(location)
+        if coord:
+            grid_data = await _fetch_elevation_grid(coord[1], coord[0])
+            if "dem" in grid_data:
+                dem = grid_data["dem"]
+                glats = grid_data["grid_lats"]
+                glons = grid_data["grid_lons"]
+                result["dem_source"] = f"Open-Meteo API @ {location}"
+                result["grid_lats"] = glats
+                result["grid_lons"] = glons
+                result["bounds"] = [glats[0], glons[0], glats[-1], glons[-1]]
+
+                valid = dem[dem > -9999] if (dem > -9999).any() else dem.flatten()
+                result["statistics"] = {
+                    "min_elevation_m": round(float(np.min(valid)), 2),
+                    "max_elevation_m": round(float(np.max(valid)), 2),
+                    "mean_elevation_m": round(float(np.mean(valid)), 2),
+                    "elevation_range_m": round(float(np.ptp(valid)), 2),
+                    "std_elevation_m": round(float(np.std(valid)), 2),
+                }
+
+                cell_m = abs(glats[1] - glats[0]) * 111000 if len(glats) > 1 else 11000
+
+                if compute_slope:
+                    gy, gx = np.gradient(dem, cell_m)
+                    slope = np.degrees(np.arctan(np.sqrt(gx**2 + gy**2)))
+                    result["slope_stats"] = {
+                        "mean_deg": round(float(np.mean(slope)), 2),
+                        "max_deg": round(float(np.max(slope)), 2),
+                        "min_deg": round(float(np.min(slope)), 2),
+                    }
+
+                if compute_aspect:
+                    gy, gx = np.gradient(dem, cell_m)
+                    aspect = np.degrees(np.arctan2(gy, gx)) % 360
+                    dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+                    dom_idx = int(((np.mean(aspect) + 22.5) % 360) / 45)
+                    result["aspect_stats"] = {"dominant": dirs[dom_idx], "mean_deg": round(float(np.mean(aspect)), 1)}
+
+                result["grid_info"] = {"width": grid_data["grid_size"], "height": grid_data["grid_size"], "resolution": "~1km (API)"}
+                result["terrain_profile"] = "lowland" if float(np.mean(valid)) < 500 else ("highland" if float(np.mean(valid)) < 1500 else "alpine")
+                return result
 
     if not path:
         return {**result, "error": "No DEM file found. Upload a GeoTIFF DEM first."}
