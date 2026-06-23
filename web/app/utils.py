@@ -71,19 +71,19 @@ def compress_result(tool: str, result: dict) -> str:
 
 def trim_context(messages: list[dict]) -> list[dict]:
     total = sum(len(m.get("content", "")) for m in messages)
-    if total <= 6000:
+    if total <= 16000:
         return messages
     system = messages[0] if messages and messages[0].get("role") == "system" else None
     rest = messages[1:] if system else messages
     removed = 0
-    target = total - 6000
+    target = total - 16000
     for i, m in enumerate(rest):
         if removed >= target:
             break
         c = m.get("content", "")
-        if len(c) > 800:
-            cut = len(c) - 400
-            rest[i] = {**m, "content": c[:400] + f"\n...[截断{cut}字符]"}
+        if len(c) > 2000:
+            cut = len(c) - 1000
+            rest[i] = {**m, "content": c[:1000] + f"\n...[截断{cut}字符]"}
             removed += cut
     result = [system, *rest] if system else rest
     cleaned = [result[0]] if result and result[0].get("role") == "system" else []

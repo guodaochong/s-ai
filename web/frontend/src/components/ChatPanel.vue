@@ -89,7 +89,19 @@ function toolSummary(result: any) {
 
 function askSuggestion(text: string) {
   if (chatStore.isStreaming) return
-  send(text)
+  inputText.value = text
+  nextTick(() => {
+    const input = document.querySelector('input[placeholder*="水利"]') as HTMLInputElement
+    if (input) {
+      input.focus()
+      const xxIdx = text.indexOf('XX')
+      if (xxIdx >= 0) {
+        input.setSelectionRange(xxIdx, xxIdx + 2)
+      } else {
+        input.select()
+      }
+    }
+  })
 }
 
 function uploadFile(e: Event) {
@@ -279,7 +291,7 @@ function closeExportMenu(e: MouseEvent) {
         <button
           v-for="(s, si) in chatStore.chainSuggestions" :key="'cs_'+si"
           class="chain-btn"
-          @click="askSuggestion('执行' + s.label)"
+          @click="askSuggestion(s.label)"
         >{{ s.label }}</button>
       </div>
 

@@ -34,13 +34,13 @@ GLM_CODE_URL = "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
 # ── Models ──
 MODEL_FLASH = "glm-4-flash-250414"
 MODEL_AIR = "glm-4-air-250414"
-MODEL_CODE = "glm-4-flash-250414"
+MODEL_CODE = "glm-4-air-250414"
 MODEL_VISION = "glm-4v-flash"
 
 # ── Cache & Circuit Breaker ──
 CACHE_MAX = 200
 CACHE_TTL = 300
-MAX_CONTEXT_CHARS = 4000
+MAX_CONTEXT_CHARS = 16000
 BREAKER_THRESHOLD = 3
 BREAKER_COOLDOWN = 120
 

@@ -16,6 +16,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import re
 import time
 
 import structlog
@@ -27,12 +28,12 @@ from app.config import (
     CRITICAL_TOOLS,
     MAX_REACT_STEPS,
     MODEL_AIR,
-    MODEL_FLASH,
     REACT_SYSTEM_PROMPT,
     TOOL_TO_SERVER,
     UPLOAD_IMG_DIR,
     _tool_cache,
 )
+from app.knowledge import CITY_COORDS
 from app.dispatcher import handle_internal_tool
 from app.llm import call_llm
 from app.mcp_client import cached_mcp_call
@@ -233,6 +234,94 @@ def _build_plan_header(plan: str) -> str:
     return f"执行计划：\n{plan[:800]}\n\n请按计划执行，每步调一个工具。禁止输出代码块。"
 
 
+_TOOL_FOLLOWUPS: dict[str, list[tuple[str, str]]] = {
+    "precipitation_grid":  [("暴雨XXmm会不会淹", "flood_sim_3d"), ("XX年一遇设计暴雨", "design_storm"), ("天气预报查询", "weather_forecast")],
+    "flood_sim_3d":        [("洪水风险评估", "flood_assessment"), ("建筑提取", "building_extract"), ("风险等级分区", "flood_risk_zones")],
+    "flood_inundation_map":[("暴雨XXmm会不会淹", "flood_sim_3d"), ("洪水风险评估", "flood_assessment"), ("建筑提取", "building_extract")],
+    "flood_assessment":    [("暴雨XXmm会不会淹", "flood_sim_3d"), ("风险等级分区", "flood_risk_zones"), ("建筑提取", "building_extract")],
+    "flood_warning":       [("暴雨XXmm会不会淹", "flood_sim_3d"), ("洪水风险评估", "flood_assessment"), ("XX年一遇设计暴雨", "design_storm")],
+    "flood_risk_zones":    [("暴雨XXmm会不会淹", "flood_sim_3d"), ("洪水风险评估", "flood_assessment"), ("建筑提取", "building_extract")],
+    "dem_analyze":         [("流域提取", "watershed_delineate"), ("河网提取", "flow_accumulation"), ("点位查询高程", "point_query")],
+    "point_query":         [("地形分析DEM", "dem_analyze"), ("地形剖面", "terrain_profile"), ("流域提取", "watershed_delineate")],
+    "terrain_profile":     [("地形分析DEM", "dem_analyze"), ("点位查询高程", "point_query"), ("流域提取", "watershed_delineate")],
+    "watershed_delineate": [("河网提取", "flow_accumulation"), ("地形分析DEM", "dem_analyze"), ("产汇流计算", "runoff_compute")],
+    "flow_accumulation":   [("流域提取", "watershed_delineate"), ("地形分析DEM", "dem_analyze"), ("点位查询高程", "point_query")],
+    "design_storm":        [("产汇流计算", "runoff_compute"), ("暴雨XXmm会不会淹", "flood_sim_3d"), ("降水降雨分析", "precipitation_grid")],
+    "runoff_compute":      [("暴雨XXmm会不会淹", "flood_sim_3d"), ("XX年一遇设计暴雨", "design_storm"), ("降水降雨分析", "precipitation_grid")],
+    "weather_forecast":    [("降水降雨分析", "precipitation_grid"), ("暴雨XXmm会不会淹", "flood_sim_3d"), ("卫星影像", "satellite_search")],
+    "building_extract":    [("暴雨XXmm会不会淹", "flood_sim_3d"), ("洪水风险评估", "flood_assessment"), ("卫星影像", "satellite_search")],
+    "satellite_search":    [("地形分析DEM", "dem_analyze"), ("建筑提取", "building_extract"), ("水体监测", "water_monitor")],
+    "water_monitor":       [("水体变化", "water_change"), ("卫星影像", "satellite_search"), ("地形分析DEM", "dem_analyze")],
+    "water_change":        [("卫星影像", "satellite_search"), ("水体监测", "water_monitor"), ("地形分析DEM", "dem_analyze")],
+    "render_map":          [("暴雨XXmm会不会淹", "flood_sim_3d"), ("降水降雨分析", "precipitation_grid"), ("地形分析DEM", "dem_analyze")],
+    "spatial_query":       [("缓冲区分析", "buffer"), ("叠加分析", "overlay"), ("坐标转换", "coordinate_transform")],
+    "buffer":              [("叠加分析", "overlay"), ("空间查询", "spatial_query"), ("渲染地图", "render_map")],
+    "overlay":             [("缓冲区分析", "buffer"), ("空间查询", "spatial_query"), ("渲染地图", "render_map")],
+    "coordinate_transform":[("空间查询", "spatial_query"), ("缓冲区分析", "buffer"), ("渲染地图", "render_map")],
+    "get_parameter":       [("产汇流计算", "runoff_compute"), ("暴雨XXmm会不会淹", "flood_sim_3d"), ("查规范防洪标准", "get_standard")],
+    "get_standard":        [("暴雨参数查询", "get_parameter"), ("XX年一遇设计暴雨", "design_storm"), ("产汇流计算", "runoff_compute")],
+    "swmm_simulate":       [("暴雨XXmm会不会淹", "flood_sim_3d"), ("XX年一遇设计暴雨", "design_storm"), ("洪水风险评估", "flood_assessment")],
+    "hydrodynamic_2d_sim": [("暴雨XXmm会不会淹", "flood_sim_3d"), ("洪水风险评估", "flood_assessment"), ("风险等级分区", "flood_risk_zones")],
+}
+
+
+def _extract_location(query: str) -> str:
+    for name in CITY_COORDS:
+        if name in query:
+            return name
+    return ""
+
+
+async def _generate_suggestions(query: str, tools_used: list[str]) -> list[str]:
+    if not tools_used:
+        return []
+    loc = _extract_location(query)
+    seen: set[str] = set()
+    result: list[str] = []
+    unmatched: list[str] = []
+    for tool in tools_used:
+        chain = _TOOL_FOLLOWUPS.get(tool)
+        if chain:
+            for label, _tool in chain:
+                if label not in seen:
+                    seen.add(label)
+                    result.append(f"{loc}{label}" if loc else label)
+        else:
+            unmatched.append(tool)
+    if len(result) >= 3:
+        return result[:3]
+    if unmatched:
+        extra = await _llm_suggestions(query, unmatched)
+        for s in extra:
+            if s not in seen:
+                seen.add(s)
+                result.append(s)
+    return result[:3]
+
+
+async def _llm_suggestions(query: str, tools_used: list[str]) -> list[str]:
+    tool_summary = "、".join(tools_used[:5])
+    prompt = (
+        f'用户问了："{query[:100]}"。已用工具：{tool_summary}。'
+        f"请生成2-3个相关的后续分析方向，每个不超过25字。"
+        f'仅返回JSON数组，如：["建议1","建议2"]'
+    )
+    try:
+        content, _, _ = await call_llm(
+            [{"role": "user", "content": prompt}],
+            model=MODEL_AIR,
+            use_tools=False,
+            max_tokens_override=200,
+        )
+        match = re.search(r'\[.*?\]', content, re.DOTALL)
+        if match:
+            suggestions = json.loads(match.group())
+            return [s[:25] for s in suggestions if isinstance(s, str)][:3]
+    except Exception:
+        pass
+    return []
+
+
 @router.get("/api/chat/stream")
 async def chat_stream(q: str, history: str = "", workflows: str = ""):
     """Main chat endpoint — streams SSE events for the entire ReAct reasoning cycle."""
@@ -304,6 +393,7 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
         react_max = 3 if is_simple else MAX_REACT_STEPS
         executed: set[str] = set()
         total_tools = 0
+        tools_used: list[str] = []
 
         yield sse({"type": "thinking_start", "agent": "react", "label": "🧠 自主推理"})
 
@@ -312,7 +402,7 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
             yield sse({"type": "thinking", "agent": "react", "content": f"━━━ 推理步骤 {step}/{react_max} ━━━"})
 
             try:
-                content, reasoning, tool_calls = await call_llm(react_messages, model=MODEL_FLASH)
+                content, reasoning, tool_calls = await call_llm(react_messages, model=MODEL_AIR)
             except Exception as e:
                 yield sse({"type": "thinking", "agent": "react", "content": f"❌ LLM失败: {str(e)[:80]}"})
                 break
@@ -337,6 +427,9 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
                 yield sse({"type": "thinking_end", "agent": "react"})
                 async for ch in stream_words(content):
                     yield sse({"type": "text", "content": ch})
+                suggestions = await _generate_suggestions(message, tools_used)
+                if suggestions:
+                    yield sse({"type": "chain_suggestion", "suggestions": [{"label": s} for s in suggestions]})
                 yield sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": step, "tools_called": total_tools, "trace": trace.to_dict()})
                 return
 
@@ -384,6 +477,8 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
                     result = {"error": str(result)[:200]}
 
                 total_tools += 1
+                if tool_name not in tools_used:
+                    tools_used.append(tool_name)
                 label = AGENT_LABELS.get(server, server)
                 result_keys = list(result.keys()) if isinstance(result, dict) else []
 
@@ -452,6 +547,9 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
             async for ch in stream_words("分析完成。如需更详细结果，请提出更具体的问题。"):
                 yield sse({"type": "text", "content": ch})
 
+        suggestions = await _generate_suggestions(message, tools_used)
+        if suggestions:
+            yield sse({"type": "chain_suggestion", "suggestions": [{"label": s} for s in suggestions]})
         yield sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": react_max, "tools_called": total_tools, "trace": trace.to_dict()})
 
     async def generate():
