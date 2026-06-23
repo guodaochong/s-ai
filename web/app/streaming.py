@@ -35,6 +35,7 @@ from app.config import (
 )
 from app.knowledge import CITY_COORDS
 from app.dispatcher import handle_internal_tool
+from app.pipeline import detect_pipeline, execute_pipeline
 from app.llm import call_llm
 from app.mcp_client import cached_mcp_call
 from app.multimodal import analyze_image
@@ -358,6 +359,38 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
             async for ch in stream_words(labels.get(ui_force, f"UI: {ui_force}")):
                 yield sse({"type": "text", "content": ch})
             yield sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": 0, "trace": trace.to_dict()})
+            return
+
+        # ── 4b. Pipeline detection — AI-powered multi-step spatial deduction ──
+        yield sse({"type": "thinking_start", "agent": "planner", "label": "🔬 分析任务复杂度"})
+        pipeline_tpl = await detect_pipeline(message)
+        yield sse({"type": "thinking_end", "agent": "planner"})
+        if pipeline_tpl:
+            loc = _extract_location(message)
+
+            async def _pipeline_exec(tool_name: str, args: dict, user_msg: str):
+                server = TOOL_TO_SERVER.get(tool_name, "")
+                return await _execute_single_tool("pipeline", tool_name, server, args, user_msg, trace)
+
+            tools_used: list[str] = []
+            async for event in execute_pipeline(pipeline_tpl, message, loc, trace, _pipeline_exec):
+                yield event
+                if isinstance(event, str) and event.startswith("data:"):
+                    try:
+                        evt = json.loads(event[5:].strip())
+                        if evt.get("type") == "pipeline_step" and evt.get("status") == "done":
+                            sid = evt.get("step_id", 0) - 1
+                            if 0 <= sid < len(pipeline_tpl["steps"]):
+                                tn = pipeline_tpl["steps"][sid]["tool"]
+                                if tn not in tools_used:
+                                    tools_used.append(tn)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+            suggestions = await _generate_suggestions(message, tools_used)
+            if suggestions:
+                yield sse({"type": "chain_suggestion", "suggestions": [{"label": s} for s in suggestions]})
+            yield sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": 0, "tools_called": len(tools_used), "trace": trace.to_dict()})
             return
 
         # ── 5. Route: regex rules → compute override → LLM fallback ──
