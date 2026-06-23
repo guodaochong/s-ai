@@ -37,7 +37,11 @@
   → GLM ReAct 推理 → Raster 服务 DEM 采样 → 结果渲染到对话 + 地图标注
 
 "帮我做一个完整的流域分析"
-  → auto-pipeline → DEM分析 → 河网提取 → 流域边界 → 汇流累积 → 地图叠加
+  → 🌊 空间推演引擎 → AI自主编排: DEM分析→流域提取→河网提取→汇流计算→渲染出图
+
+"赤峰从降雨预报到洪水淹没完整过程"
+  → 🌊 空间推演引擎 → AI编排6步DAG: 降雨网格→设计暴雨→径流计算→3D洪水模拟→淹没范围→渲染
+  → 每步结果实时渲染到地图，DAG进度条可视化
 
 "这个区域如果发生百年一遇暴雨，哪里会被淹？"
   → 设计暴雨生成 → SCS-CN径流 → 洪水淹没 → 风险分区 → 3D水动力模拟
@@ -79,6 +83,7 @@
 │  │   历史    │  │  图层管理 (GeoJSON 叠加)      │  │  18+ 工具渲染策略          │ │
 │  │ · 系统    │  │  水位控制 + 时间线播放器       │  │  导出 (GeoJSON/报告)      │ │
 │  │   信息    │  │  示例图层 + 坐标拾取          │  │  Auto-pipeline 链式推理   │ │
+│  │  推演DAG + 进度条         │ │
 │  └──────────┘  └──────────────────────────────┘  └───────────────────────────┘ │
 │                                                                                 │
 │  ┌──────────────────────────────────────────────────────────────────────────┐   │
@@ -95,7 +100,7 @@
 │                    ⚡ FastAPI Orchestration Layer (Port 3000)                     │
 │                                                                                  │
 │  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │                       🧠 GLM-5.1 推理引擎                                │   │
+│  │                       🧠 GLM-4 AIR 推理引擎                                │   │
 │  │                                                                          │   │
 │  │  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │   │
 │  │  │  三层路由     │  │  ReAct 推理   │  │  辩论验证     │  │  思维树      │ │   │
@@ -200,7 +205,7 @@ Step 3/8: 💭 综合分析完成
           ✅ 推理完成，共3步，调用2个工具
 ```
 
-每步可选 42+ 个工具中的任意组合，自动串联上下文（前一步的输出可作为下一步的输入）。
+每步可选 53 个工具中的任意组合，自动串联上下文（前一步的输出可作为下一步的输入）。
 
 ### 3. 辩论验证 (Debate Validation)
 
@@ -216,7 +221,7 @@ Step 3/8: 💭 综合分析完成
 
 ### 4. 自动工具生成 + 自修复
 
-当现有 36 个工具无法满足需求时，触发 `auto_tool`：
+当现有 53 个工具无法满足需求时，触发 `auto_tool`：
 
 ```
 用户: "帮我计算这个流域的重现期降雨强度"
@@ -259,6 +264,66 @@ LLM 生成 Python 代码 → 沙箱执行
 ```
 
 执行后还有**水力学物理校验**：流速 0-15 m/s、水深正值、坡度 0-90°。
+
+### 7. 空间推演引擎 (Spatial Deduction Engine)
+
+面对复杂分析需求，系统不再是逐步ReAct推理，而是**AI自主编排完整工具链**——从一句话生成可执行的DAG（有向无环图），逐步推演，实时可视化。
+
+```
+用户: "赤峰从降雨预报到洪水淹没完整过程"
+      ↓
+┌─ AI自主编排 ───────────────────────────────────────────────────┐
+│                                                                │
+│  GLM-4 AIR 收到：                                               │
+│  · 18个pipeline工具目录 + 描述                                   │
+│  · 用户原始query                                                │
+│  · 领域编排规则                                                  │
+│                                                                │
+│  AI自主决定：                                                    │
+│  ✅ 选哪些工具（从18个里动态选择）                                 │
+│  ✅ 什么顺序（基于水文工程领域知识）                                │
+│  ✅ pipeline名称 + emoji图标                                     │
+│                                                                │
+│  → 输出JSON工具链                                                │
+└────────────────────────────┬───────────────────────────────────┘
+                             ↓
+┌─ 安全保障层（代码兜底，非AI） ──────────────────────────────────┐
+│  · 工具名校验：必须在18个目录中                                    │
+│  · 拓扑排序：径流必须在暴雨后，损失评估必须在模拟后                    │
+│  · 首尾修正：降雨/地形排首位，渲染排末尾                             │
+│  · 步数限制：3-6步                                                │
+└────────────────────────────┬───────────────────────────────────┘
+                             ↓
+┌─ 逐步推演 + 实时可视化 ────────────────────────────────────────┐
+│                                                                │
+│  🌧️ 降雨分析 ──→ 🌧️ 设计暴雨 ──→ 💧 径流计算                    │
+│     ✅ 完成        ✅ 完成         ✅ 完成                        │
+│                       ↓                                         │
+│  🌊 洪水模拟 ──→ 🗺️ 淹没范围 ──→ 🗺️ 渲染出图                    │
+│     ✅ 完成        ✅ 完成         ✅ 完成                        │
+│                                                                │
+│  DAG节点逐步亮起 (⏳→🔄→✅)                                      │
+│  进度条: 10% → 30% → 50% → 70% → 90% → 100%                    │
+│  每步结果实时渲染到2D/3D地图场景                                   │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**不是预设模板，是AI实时编排。** 同一个系统，面对不同的分析需求，会生成完全不同的工具链。
+
+### 8. 智能追问建议
+
+每次分析完成后，系统基于已使用的工具，自动推荐最相关的后续操作：
+
+```
+用户完成降雨分析后:
+  🔗 推荐下一步:
+  [赤峰暴雨XXmm会不会淹]  [赤峰XX年一遇设计暴雨]  [赤峰天气预报查询]
+       ↓ 点击填入输入框       ↓ XX自动选中          ↓ 直接查询
+  用户输入150 → 回车发送     用户输入100 → 回车      触发weather_forecast
+  → 触发flood_sim_3d        → 触发design_storm
+```
+
+27个工具的链式推荐映射，81条建议文本全部通过路由规则匹配验证，确保点击后100%触发正确工具。
 
 ---
 
@@ -314,26 +379,29 @@ LLM 生成 Python 代码 → 沙箱执行
 | `drone_mission` | **🚁无人机飞行预览 + 航点标记 + 轨迹尾迹 + KML下载** |
 | Generic fallback | 表格 / 代码块 / JSON / SVG 图表 |
 
-### SSE 事件流 (12 种类型)
+### SSE 事件流 (15 种类型)
 
 ```
-start           → 会话初始化，获取 conv_id
-thinking_start  → 创建思考框 (Spinner + Agent + Label)
-thinking        → 添加思考行 (6 种样式分类)
-thinking_end    → 关闭思考框 (✓ complete)
-tool_start      → 工具开始 (⏳ running + 实时计时)
-tool_end        → 工具结束 (✅ ok / ❌ error)
-tool_result     → 工具结果 + 地图动作 + HTML 渲染
-tool_error      → 工具错误信息
-divider         → 分隔线 (两侧渐变)
-chain_suggestion → 推荐下一步操作
-text            → LLM 文本回复
-done            → 推理完成
+start            → 会话初始化，获取 conv_id
+thinking_start   → 创建思考框 (Spinner + Agent + Label)
+thinking         → 添加思考行 (6 种样式分类)
+thinking_end     → 关闭思考框 (✓ complete)
+tool_start       → 工具开始 (⏳ running + 实时计时)
+tool_end         → 工具结束 (✅ ok / ❌ error)
+tool_result      → 工具结果 + 地图动作 + HTML 渲染
+tool_error       → 工具错误信息
+pipeline_start   → 推演引擎启动 (DAG节点列表)
+pipeline_step    → 节点状态更新 (pending→running→done/error)
+pipeline_done    → 推演完成 (总耗时+步数)
+chain_suggestion → 智能追问建议 (工具链推荐)
+divider          → 分隔线 (两侧渐变)
+text             → LLM 文本回复
+done             → 推理完成
 ```
 
 ---
 
-## ◆ 能力矩阵 · 42+ 工具
+## ◆ 能力矩阵 · 53 工具
 
 ### 🤖 AI 视觉与遥感 (6 tools)
 
@@ -364,7 +432,7 @@ done            → 推理完成
 
 | 工具 | 说明 |
 |------|------|
-| `dem_analyze` | DEM 高程/坡度/坡向采样 (0.5m分辨率) |
+| `dem_analyze` | DEM 高程/坡度/坡向采样 (0.5m分辨率, 无DEM时自动从API获取) |
 | `flow_accumulation` | D8 流向 + 汇流累积 |
 | `watershed_delineate` | Strahler 分级流域自动提取 |
 | `terrain_profile` | 地形剖面线 |
@@ -620,8 +688,10 @@ ShaderMaterial (GLSL)
 
 | 命令 | 触发能力 | 效果 |
 |------|---------|------|
+| `赤峰从降雨预报到洪水淹没完整过程` | 🌊 空间推演引擎 | AI自主编排6步DAG: 降雨→暴雨→径流→3D洪水→淹没→渲染 |
+| `模拟赤峰暴雨洪水全过程` | 🌊 空间推演引擎 | AI编排: DEM→设计暴雨→径流→洪水模拟→损失评估 |
 | `识别天水市中心的建筑物` | 🏙️ OSM建筑提取 | 卫星影像 + 建筑轮廓 + 6类分类(住宅/商业/工业) |
-| `展示赤峰市未来三天预报降雨过程` | 🌧️ ERA5-Land降水网格 | 动画热力图 + 移动暴雨中心 + 面雨量过程线 |
+| `展示赤峰市未来三天预报降雨过程` | 🌧️ ERA5-Land降水网格 | 动画热力图 + 移动暴雨中心 + 村庄级逆地理编码 |
 | `识别天水的水体` | 🌊 Sentinel-2 NDWI | 卫星下载 + 水体多边形 + 面积统计 |
 | `天水市暴雨24小时150mm会不会淹` | 🌊 分布式水文×二维水动力 | SRTM DEM→SCS-CN产流→汇流→淹没演进→建筑评估 |
 | `天水洪水无人机巡查航线` | 🚁 无人机航线规划 | 洪水热点→TSP优化→3D飞行预览→KML导出DJI |
@@ -650,8 +720,8 @@ pip install fastapi uvicorn httpx zhipuai rasterio geopandas shapely \
             numpy scipy fiona pyswmm structlog python-dotenv \
             segment-anything torch torchvision pillow opencv-python pyproj
 
-# 3. 启动后端 (7 MCP + Web Server)
-python web/server.py
+# 3. 一键启动全部服务 (7 MCP + Web Server)
+python start_all.py
 # → Web  :3000  GIS  :5001  Data :5002  Knowledge :5003
 # → Map  :5004  Hydro:5005  Flood:5006  Raster    :5007
 
@@ -674,49 +744,60 @@ cd web/frontend && npm run build    # → dist/ (~836KB JS, 236KB gzip)
 ```
 S-AI/
 ├── web/
-│   ├── server.py                    # 后端主服务 (2600+行)
-│   │   ├── 三层路由 (L1/L2/L3)      │   ├── 辩论验证 (3角色)
-│   │   ├── ReAct 推理 (8步)         │   ├── 思维树 (ToT)
-│   │   ├── 自动工具生成 + 自修复     │   ├── 熔断器 + LRU缓存
-│   │   ├── 全链路追踪               │   ├── 城市地理编码 (46城+Nominatim)
-│   │   ├── 洪水结果缓存耦合         │   ├── 常识注入 + 物理校验
-│   │   └── 对话持久化 + 文件上传
+│   ├── server.py                    # 后端入口 (~55行, create_app factory)
+│   ├── app/                         # 后端核心模块 (重构自2600行单体)
+│   │   ├── config.py                # GLM_TOOLS(53), TOOL_TO_SERVER, ROUTING_RULES
+│   │   ├── streaming.py             # SSE chat endpoint + ReAct推理循环 + pipeline集成
+│   │   ├── pipeline.py              # 🌊 空间推演引擎 (AI自主编排DAG)
+│   │   ├── dispatcher.py            # 12个内部工具handler
+│   │   ├── router.py                # 三层路由 L1→L2→L3
+│   │   ├── services.py              # 8个领域服务 (flood_sim_3d, building_extract...)
+│   │   ├── knowledge.py             # 知识图谱 + 天气/降水/卫星API
+│   │   ├── llm.py                   # GLM-4 AIR 异步客户端
+│   │   ├── utils.py                 # compress_result, trim_context(16K), SSE
+│   │   ├── store.py                 # MemoryStore + ConversationStore (SQLite WAL)
+│   │   ├── validators.py            # 物理校验 + 三角色辩论验证
+│   │   ├── multimodal.py            # GLM-4V 图像分析
+│   │   ├── auth.py                  # API Key中间件 (timing-safe)
+│   │   ├── mcp_client.py            # MCP SSE客户端 (缓存+熔断器)
+│   │   ├── tracing.py               # TraceSpan + 路由演化追踪
+│   │   ├── routes/                  # REST API routers
+│   │   │   ├── system.py            # health, servers, heightmap
+│   │   │   ├── files.py             # upload, image analysis
+│   │   │   ├── data.py              # memory, weather, satellite, kg
+│   │   │   ├── tracing.py           # traces, evolution stats
+│   │   │   ├── reconstruct.py       # 3D reconstruction
+│   │   │   └── conversations.py     # 会话历史 CRUD
+│   │   └── tools/                   # LLM代码生成沙箱
+│   │       ├── sandbox.py           # AST安全检查 + subprocess执行
+│   │       ├── _sandbox_runner.py   # restricted builtins + import白名单
+│   │       └── generator.py         # LLM代码生成 + 质量检查 + 自修复
 │   │
-│   ├── reconstruct/                 # AI 3D重建模块
-│   │   └── engine.py                # TripoSR引擎 (lazy load, GLB export)
-│   │
-│   ├── segment/                     # AI 建筑提取模块
-│   │   ├── engine.py                # SAM vit_b 分割 + 建筑分类
-│   │   ├── osm_buildings.py         # OSM Overpass建筑+土地利用CN查询
-│   │   └── tile_fetcher.py          # ArcGIS World Imagery 瓦片下载
-│   │
-│   ├── water_monitor/               # 遥感水体监测模块
-│   │   └── engine.py                # Sentinel-2 STAC搜索 + NDWI提取
-│   │
+│   ├── reconstruct/                 # AI 3D重建模块 (TripoSR)
+│   ├── segment/                     # AI 建筑提取模块 (OSM + SAM)
+│   ├── water_monitor/               # 遥感水体监测模块 (Sentinel-2)
 │   ├── flood_sim/                   # 分布式水文×二维水动力模块
-│   │   ├── engine.py                # DEM获取+D8流向+Manning二维演进
-│   │   └── hydro_chain.py           # 河网提取+分布式CN+时间面积法汇流
-│   │
 │   ├── drone/                       # 无人机航线规划模块
-│   │   └── mission.py               # 风险热点识别+TSP优化+KML导出
-│   │
-│   ├── index.html                   # 原版前端 (2596行, 参考)
 │   └── frontend/                    # Vue 3 前端
-│       ├── vite.config.ts
 │       └── src/
-│           ├── App.vue              # 三栏布局 260px|1fr|460px
 │           ├── components/          # TopBar SideBar MapPanel ChatPanel
 │           │                        # ReconstructionPanel WorkflowEditor
 │           ├── stores/              # chat.ts map.ts three.ts
 │           ├── composables/         # useSSE useToolRenderer useServices
-│           ├── types/               # SSEEvent ChatMessage ToolResult MapLayerInfo
-│           └── styles/              # variables.css main.css
+│           └── types/               # SSEEvent ChatMessage ToolResult
 │
-├── data/
-│   ├── LBH_DEM_v2_0.5m_EPSG4544.tif  # 3GB DEM
-│   ├── agent_memory.db              # 智能体记忆
-│   ├── conversations.db             # 对话持久化
-│   └── generated_tools/             # LLM 生成工具
+├── servers/                         # 7个MCP微服务
+│   ├── mcp-gis/                     # Port 5001: 空间查询/缓冲区/叠加/坐标转换
+│   ├── mcp-data/                    # Port 5002: 数据导入/空间查询
+│   ├── mcp-knowledge/               # Port 5003: 参数查询/语义搜索
+│   ├── mcp-map/                     # Port 5004: 地图渲染/专题图
+│   ├── mcp-hydro/                   # Port 5005: 设计暴雨/径流/SWMM
+│   ├── mcp-flood/                   # Port 5006: 洪水淹没/评估/风险
+│   └── mcp-raster/                  # Port 5007: DEM分析/流域/汇流
+│
+├── sai/                             # 分布式Agent系统 (Redis + EventBus)
+├── start_all.py                     # 一键启动 7 MCP + Web
+├── data/                            # DEM, SQLite, 生成工具
 ├── .env                             # ZHIPUAI_API_KEY
 └── README.md
 ```
