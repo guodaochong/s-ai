@@ -21,13 +21,14 @@ logger = structlog.get_logger(__name__)
 
 # ── API Keys & Endpoints ──
 ZHIPUAI_API_KEY = os.getenv("ZHIPUAI_API_KEY", "")
-GLM_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-GLM_CODE_URL = "https://open.bigmodel.cn/api/pying/paas/v4/chat/completions"
+GLM_API_URL = "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+GLM_CODE_URL = "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
 
 # ── Models ──
 MODEL_FLASH = "glm-4-flash-250414"
 MODEL_AIR = "glm-4-air-250414"
 MODEL_CODE = "glm-4-flash-250414"
+MODEL_VISION = "glm-4v-flash"
 
 # ── Cache & Circuit Breaker ──
 CACHE_MAX = 200
@@ -43,10 +44,10 @@ _last_cache_sweep: float = 0.0
 # ── MCP Servers ──
 MCP_SERVERS = {
     "knowledge": "http://127.0.0.1:5003",
-    "gis": "http://127.0.0.1:5011",
+    "gis": "http://127.0.0.1:5001",
     "data": "http://127.0.0.1:5002",
     "map": "http://127.0.0.1:5004",
-    "hydro": "http://127.0.0.1:5015",
+    "hydro": "http://127.0.0.1:5005",
     "flood": "http://127.0.0.1:5006",
     "raster": "http://127.0.0.1:5007",
 }
@@ -77,6 +78,8 @@ DATA_DIR = Path(__file__).parent.parent.parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 GEN_TOOL_DIR = DATA_DIR / "generated_tools"
 GEN_TOOL_DIR.mkdir(parents=True, exist_ok=True)
+RECON_DIR = Path(__file__).parent.parent / "reconstruct"
+RECON_OUTPUTS = RECON_DIR / "outputs"
 
 # ── Study Area ──
 STUDY_BBOX = [104.83, 33.10, 104.95, 33.27]
@@ -86,7 +89,7 @@ CRITICAL_TOOLS = {"hydrodynamic_2d_sim", "flood_assessment", "flood_risk_zones",
 
 # ── GLM Tool Definitions ──
 GLM_TOOLS = [
-    {"type": "function", "function": {"name": "get_parameter", "description": "查询水利参数表(manning_n糙率/scs_cn曲线数/design_storm暴雨/pipe_specs管材/pump_specs水泵/lid_design海绵/drainage_design排水标准)", "parameters": {"type": "object", "properties": {"parameter_name": {"type": "string", "description": "参数表名: manning_n, scs_cn, design_storm, pipe_specs, pump_specs, lid_design, drainage_design"}, "conditions": {"type": "object", "description": "过滤条件, 如 {\"surface\": \"混凝土管道\"} 或 {\"city\": \"成都\"}", "properties": {}}}, "required": ["parameter_name"]}}},
+    {"type": "function", "function": {"name": "get_parameter", "description": "查询水利参数表(manning_n糙率/scs_cn曲线数/design_storm暴雨/pipe_specs管材/pump_specs水泵/lid_design海绵/drainage_design排水标准)", "parameters": {"type": "object", "properties": {"parameter_name": {"type": "string", "description": "参数表名: manning_n, scs_cn, design_storm, pipe_specs, pump_specs, lid_design, drainage_design"}, "conditions": {"type": "object", "description": "过滤条件, 如 {\"surface\": \"混凝土管道\"} 或 {\"city\": \"成都\"}", "properties": {}}, "required": ["parameter_name"]}}}},
     {"type": "function", "function": {"name": "search", "description": "知识库语义搜索", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "搜索关键词"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "get_standard", "description": "查询水利标准规范", "parameters": {"type": "object", "properties": {"standard_id": {"type": "string", "description": "标准编号如 GB50014"}, "keyword": {"type": "string", "description": "关键词搜索"}}, "required": ["standard_id"]}}},
     {"type": "function", "function": {"name": "explain_concept", "description": "解释水利专业概念(水文/水力/排水/防洪)", "parameters": {"type": "object", "properties": {"concept": {"type": "string", "description": "概念名称, 如'曼宁公式'、'SCS-CN'、'设计暴雨'"}, "detail_level": {"type": "string", "enum": ["brief", "detailed", "technical"], "description": "详细程度", "default": "detailed"}}, "required": ["concept"]}}},
@@ -104,48 +107,54 @@ GLM_TOOLS = [
 ]
 
 GLM_TOOLS.extend([
-    {"type": "function", "function": {"name": "weather_forecast", "description": "获取天气预报数据(降雨、温度、风速)", "parameters": {"type": "object", "properties": {"latitude": {"type": "number", "default": 33.19}, "longitude": {"type": "number", "default": 104.89}, "forecast_days": {"type": "integer", "default": 3}}, "required": []}}},
+    {"type": "function", "function": {"name": "weather_forecast", "description": "天气预报：获取逐日温度、风速、降水摘要数据(不含过程动画)", "parameters": {"type": "object", "properties": {"latitude": {"type": "number", "default": 33.19}, "longitude": {"type": "number", "default": 104.89}, "forecast_days": {"type": "integer", "default": 3}}, "required": []}}},
     {"type": "function", "function": {"name": "satellite_search", "description": "搜索卫星遥感影像(Sentinel-2)", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]", "items": {"type": "number"}}, "date_start": {"type": "string", "description": "开始日期 YYYY-MM-DD"}, "date_end": {"type": "string", "description": "结束日期 YYYY-MM-DD"}}, "required": []}}},
     {"type": "function", "function": {"name": "spatial_knowledge_query", "description": "查询空间知识图谱(实体和关系)", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "查询关键词"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "scatter_interpolate", "description": "散点插值/克里金插值", "parameters": {"type": "object", "properties": {"points_json": {"type": "string", "description": "散点JSON数组"}, "method": {"type": "string", "description": "插值方法", "default": "linear"}, "grid_resolution": {"type": "integer", "description": "网格分辨率(NxN)", "default": 100}}, "required": []}}},
     {"type": "function", "function": {"name": "auto_tool", "description": "【最终兜底工具】自动生成并执行Python代码完成计算任务", "parameters": {"type": "object", "properties": {"requirement": {"type": "string", "description": "用户的完整需求描述"}}, "required": ["requirement"]}}},
+    {"type": "function", "function": {"name": "reconstruct_3d", "description": "AI三维重建：从单张照片生成3D模型(GLB格式)，基于TripoSR", "parameters": {"type": "object", "properties": {"image_path": {"type": "string", "description": "上传图片的文件路径"}}, "required": ["image_path"]}}},
+    {"type": "function", "function": {"name": "precipitation_grid", "description": "降水过程分析：获取逐小时降水网格数据，生成降雨过程热力图动画和面雨量过程线。用户问降雨过程/降水预报/面雨量/暴雨分析时用此工具", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "[west,south,east,north]经纬度范围", "items": {"type": "number"}}, "grid_size": {"type": "integer", "default": 8}, "forecast_mode": {"type": "boolean", "default": False}, "location": {"type": "string", "description": "地名(自动地理编码)"}}, "required": []}}},
+    {"type": "function", "function": {"name": "building_extract", "description": "建筑物提取。用location传地名，系统自动定位", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "仅当用户给出明确坐标时填", "items": {"type": "number"}}, "location": {"type": "string", "description": "地名"}}, "required": ["location"]}}},
+    {"type": "function", "function": {"name": "water_monitor", "description": "水体监测。用location传地名，系统自动定位", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "仅当用户给出明确坐标时填", "items": {"type": "number"}}, "location": {"type": "string", "description": "地名"}}, "required": ["location"]}}},
+    {"type": "function", "function": {"name": "water_change", "description": "水体变化检测。用location传地名，系统自动定位", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "仅当用户给出明确坐标时填", "items": {"type": "number"}}, "location": {"type": "string", "description": "地名"}, "date1": {"type": "string", "description": "第一期 YYYY-MM"}, "date2": {"type": "string", "description": "第二期 YYYY-MM"}}, "required": ["location"]}}},
+    {"type": "function", "function": {"name": "flood_sim_3d", "description": "3D洪水模拟。用location传地名(如天水市)，系统自动定位。不要自己编bbox坐标", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "仅当用户给出明确数值坐标时填", "items": {"type": "number"}}, "location": {"type": "string", "description": "地名，如天水市、白龙江"}, "rainfall_mm": {"type": "number", "default": 100}}, "required": ["location"]}}},
+    {"type": "function", "function": {"name": "drone_mission", "description": "无人机航线规划。用location传地名，系统自动定位", "parameters": {"type": "object", "properties": {"bbox": {"type": "array", "description": "仅当用户给出明确坐标时填", "items": {"type": "number"}}, "location": {"type": "string", "description": "地名"}, "mission_type": {"type": "string", "default": "flood_inspect"}}, "required": ["location"]}}},
+    {"type": "function", "function": {"name": "multi_agent_debate", "description": "多智能体辩论：多个AI专家从不同角度分析问题并综合结论", "parameters": {"type": "object", "properties": {"requirement": {"type": "string", "description": "辩论主题/场景描述"}}, "required": ["requirement"]}}},
 ])
 
 # ── ReAct System Prompt ──
-REACT_SYSTEM_PROMPT = """你是 S-AI 水利空间智能体，具备自主推理能力。专业水利工程师和空间分析师。
+REACT_SYSTEM_PROMPT = """你是 S-AI 水利空间智能体，专业水利工程师和空间分析师。
 
-DEM数据位于甘肃迭部县(104.89°E, 33.19°N)，0.5m分辨率，3GB GeoTIFF。
+工具选择参考：
+- 暴雨/洪水/淹没/会不会淹/内涝 → flood_sim_3d
+- 降雨过程/降水/面雨量/暴雨分析 → precipitation_grid
+- 天气/温度/风速(逐日摘要) → weather_forecast
+- 卫星/遥感影像 → satellite_search
+- DEM/地形/坡度分析 → dem_analyze
+- 点位高程查询 → point_query
+- 设计暴雨/暴雨强度公式 → design_storm
+- SCS-CN/径流系数/产汇流 → runoff_compute
+- SWMM/排水管网 → swmm_simulate
+- 缓冲区/周边范围 → buffer
+- 空间叠加/交集 → overlay
+- 坐标转换 → coordinate_transform
+- 知识库/资料搜索 → search
+- 规范标准查询 → get_standard
+- 概念解释 → explain_concept
+- 参数查询(糙率/CN/管材) → get_parameter
+- 克里金/IDW插值 → scatter_interpolate
+- 建筑提取 → building_extract
+- 水体监测 → water_monitor
+- 无人机航线 → drone_mission
+- 3D重建 → reconstruct_3d
+- 渲染地图/出图 → render_map
+- 计算/公式/拟合/生成图形 → auto_tool
 
-必须调工具的场景（不要直接回复文字，必须调工具）：
-- 进行/运行/执行 模拟、计算、分析 → 调对应工具
-- 查/查询 参数、数值 → 调 get_parameter
-- 涉及具体数值 → 必须调工具，不要捏造
-- 用户提到内涝/淹没/洪水/积水 → 必须调 flood_inundation_map
-- 用户问天气/降雨预报 → 调 weather_forecast
-- 用户问卫星/遥感影像 → 调 satellite_search
-
-【关键规则 - auto_tool 兜底】
-以下场景必须调 auto_tool，绝对不能输出Python代码文本：
-- 计算/公式/求解/拟合/统计/矩阵/表格/曲线/图表
-- 生成/绘制/画 GeoJSON/多边形/线/图形
-- 水力计算(渠道/水深/流量/流速/曼宁/梯形/矩形)
-- 水文计算(单位线/演进/马斯京根/频率分析)
-- 任何需要写代码才能完成的任务
-- 找不到合适工具时 → auto_tool 是最终兜底
-
-绝对禁止：输出Python/代码块/代码示例。只能调工具。
-
-可以不调工具的场景：
-- 纯寒暄（你好/谢谢/再见）
-
-推理规则：
-- 复合任务需多步推理：先获取参数→再计算→最后评估
-- 参数从对话上下文提取实际值，不要编造
-- 工具返回错误时分析原因并调整参数重试
-- 【思维链要求】每步推理必须包含：(1)分析当前状况 (2)为什么选择此工具 (3)参数取值的依据 (4)预期结果
-- 回复专业、准确、有条理
-- 关键：完成空间计算后（插值/模拟/地形分析/流域提取等），如果用户要求展示/渲染/出图，必须再调 render_map 将结果渲染到地图上
-- 关键：auto_tool生成工具执行成功后，如果结果包含空间数据，必须主动在回复中说明结果并引导用户查看地图"""
+规则：
+- 涉及分析/模拟/计算的请求必须调工具，不能直接回复文字
+- 参数从对话上下文提取实际值
+- 工具返回错误时调整参数重试
+- 禁止输出Python代码，只能调工具"""
 
 # ── Routing Rules ──
 ROUTING_RULES: list[tuple[str, str]] = [
@@ -163,7 +172,8 @@ ROUTING_RULES: list[tuple[str, str]] = [
     (r"四叉树|自适应网格|嵌套剖分", "quadtree_subdivide"),
     (r"暴雨雨型|设计暴雨|暴雨强度公式", "design_storm"),
     (r"SCS.CN|径流系数|产汇流", "runoff_compute"),
-    (r"淹没范围|淹没地图|淹没面积|淹没图|会不会被水淹|积水", "flood_inundation_map"),
+    (r"会不会淹|暴雨.*淹|内涝|洪涝|洪水.*淹|3D.*洪水|三维.*洪水|3D淹没|flood_sim_3d", "flood_sim_3d"),
+    (r"淹没范围|淹没地图|淹没面积|淹没图|积水", "flood_inundation_map"),
     (r"洪水风险|内涝评估", "flood_assessment"),
     (r"排水能力|排水评估", "drainage_assessment"),
     (r"洪水预警|防汛预警", "flood_warning"),
@@ -182,10 +192,16 @@ ROUTING_RULES: list[tuple[str, str]] = [
     (r"天气预报|降雨预报|气象预报", "weather_forecast"),
     (r"卫星影像|遥感|Sentinel|Landsat", "satellite_search"),
     (r"渲染地图|出图|绘制地图", "render_map"),
+    (r"3D重建|三维建模|三维重建|reconstruct", "reconstruct_3d"),
+    (r"多智能体|多代理|辩论|multi.?agent", "multi_agent_debate"),
+    (r"无人机|航线规划|UAV|drone", "drone_mission"),
+    (r"降水|降雨|面雨量|precipitation|雨量", "precipitation_grid"),
+    (r"建筑|building|房子|楼房", "building_extract"),
+    (r"水体变化|水域变化|water.*change", "water_change"),
+    (r"水体|水域|水面|water.*monitor", "water_monitor"),
 ]
 
 # ── Simple Keywords ──
-SIMPLE_KEYWORDS = {"你好", "谢谢", "再见", "hello", "hi", "拜拜", "早上好", "晚上好", "谢谢你", "哈喽"}
+SIMPLE_KEYWORDS = {"你好", "谢谢", "再见", "hello", "hi", "拜拜", "早上好", "晚上好", "谢谢啦", "谢谢你", "哈喽"}
 
-# ── All Tools List ──
-ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,rag_search,scenario_compare,storm_flood_pipeline,auto_tool".split(",")
+ALL_TOOLS = "hydrodynamic_2d_sim,get_parameter,explain_concept,search,get_standard,dem_analyze,watershed_delineate,flow_accumulation,terrain_profile,point_query,dem_render,tin_generate,quadtree_subdivide,design_storm,runoff_compute,swmm_create_model,swmm_simulate,calibrate_suggest,flood_inundation_map,flood_assessment,drainage_assessment,flood_warning,flood_risk_zones,spatial_query,buffer,overlay,coordinate_transform,geometry_properties,validate_data,render_map,weather_forecast,satellite_search,spatial_knowledge_query,scatter_interpolate,rag_search,scenario_compare,storm_flood_pipeline,auto_tool,reconstruct_3d,precipitation_grid,building_extract,water_monitor,flood_sim_3d,drone_mission,water_change,multi_agent_debate".split(",")
