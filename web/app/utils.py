@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 
+import numpy as np
 import structlog
 
 from app.config import AGENT_LABELS, TOOL_TO_SERVER, logger
@@ -93,6 +95,17 @@ def compress_result(tool: str, result: dict) -> str:
         return f"评估: 风险等级{result.get('risk_level','?')} 受影响{result.get('affected_area_km2','?')}km2"
     if tool == "flood_warning":
         return f"预警: {result.get('warning_level','?')}级 风险={result.get('risk_score','?')}"
+    if tool == "weather_forecast":
+        daily = result.get("daily", {})
+        times = daily.get("time", [])
+        precip = daily.get("precipitation_sum", [])
+        tmax = daily.get("temperature_2m_max", [])
+        tmin = daily.get("temperature_2m_min", [])
+        parts = []
+        for i in range(min(len(times), 7)):
+            line = f"{times[i]}: {precip[i] if i < len(precip) else '?'}mm {tmin[i] if i < len(tmin) else '?'}-{tmax[i] if i < len(tmax) else '?'}°C"
+            parts.append(line)
+        return "天气预报: " + " | ".join(parts)
     if tool == "get_parameter":
         entries = result.get("results", [])
         return f"参数({result.get('parameter','?')}): {len(entries)}条 " + "; ".join(json.dumps(e, ensure_ascii=False)[:80] for e in entries[:3])
@@ -165,3 +178,151 @@ def get_chain_suggestions(tool: str) -> list[dict]:
         "terrain_profile": [{"tool": "render_map", "reason": "渲染剖面图"}],
     }
     return chains.get(tool, [])
+
+
+def bbox_overlap(a: list[float], b: list[float]) -> bool:
+    if not a or not b or len(a) != 4 or len(b) != 4:
+        return False
+    return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
+
+
+def fix_polygon_coords(rings):
+    if not rings:
+        return None
+    fixed_rings = []
+    for ring in rings:
+        if not isinstance(ring, list):
+            return None
+        fixed_ring = []
+        for pt in ring:
+            if not isinstance(pt, (list, tuple)) or len(pt) < 2:
+                return None
+            try:
+                lon = float(pt[0])
+                lat = float(pt[1])
+            except (TypeError, ValueError):
+                return None
+            if not (math.isfinite(lon) and math.isfinite(lat)):
+                return None
+            if abs(lon) > 180 or abs(lat) > 90:
+                return None
+            fixed_ring.append([lon, lat])
+        if len(fixed_ring) < 3:
+            return None
+        if fixed_ring[0] != fixed_ring[-1]:
+            fixed_ring.append(fixed_ring[0])
+        fixed_rings.append(fixed_ring)
+    return fixed_rings if fixed_rings else None
+
+
+def fix_line_coords(lines):
+    if not lines:
+        return None
+    if isinstance(lines[0], (int, float)):
+        pts = lines
+        fixed = []
+        for pt in pts:
+            try:
+                v = float(pt)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(v):
+                return None
+            fixed.append([v])
+        return fixed
+    fixed_lines = []
+    for line in lines:
+        if not isinstance(line, list):
+            return None
+        fixed = []
+        for pt in line:
+            if not isinstance(pt, (list, tuple)) or len(pt) < 2:
+                return None
+            try:
+                lon = float(pt[0])
+                lat = float(pt[1])
+            except (TypeError, ValueError):
+                return None
+            if not (math.isfinite(lon) and math.isfinite(lat)):
+                return None
+            fixed.append([lon, lat])
+        if len(fixed) >= 2:
+            fixed_lines.append(fixed)
+    return fixed_lines if fixed_lines else None
+
+
+def sanitize_geojson_result(result: dict) -> dict | None:
+    if not isinstance(result, dict) or "geojson" not in result:
+        return None
+    gj = result["geojson"]
+    if not isinstance(gj, dict) or "features" not in gj:
+        return None
+    cleaned_features = []
+    for f in gj["features"]:
+        if not isinstance(f, dict) or "geometry" not in f:
+            cleaned_features.append(f)
+            continue
+        geom = f["geometry"]
+        gtype = geom.get("type", "")
+        coords = geom.get("coordinates")
+        if gtype in ("Polygon", "MultiPolygon") and coords:
+            try:
+                fixed = fix_polygon_coords(coords)
+                if fixed:
+                    geom["coordinates"] = fixed
+                    cleaned_features.append(f)
+            except Exception:
+                pass
+        elif gtype in ("LineString", "MultiLineString") and coords:
+            try:
+                fixed = fix_line_coords(coords)
+                if fixed:
+                    geom["coordinates"] = fixed
+                    cleaned_features.append(f)
+            except Exception:
+                pass
+        else:
+            cleaned_features.append(f)
+    gj["features"] = cleaned_features
+    result["geojson"] = gj
+    return result
+
+
+def normalize_auto_tool_result(result: dict) -> dict:
+    viz_keys = {"geojson", "points", "data_points", "table", "chart_type", "image_base64", "time_series"}
+    top_keys = set(str(k).lower() for k in result.keys())
+    has_viz = bool(top_keys & viz_keys)
+    if has_viz:
+        return result
+    flat = {}
+    for k, v in result.items():
+        if k.startswith("_"):
+            flat[k] = v
+            continue
+        if isinstance(v, dict):
+            for vk, vv in v.items():
+                if vk.lower() in viz_keys or vk in viz_keys:
+                    flat[vk] = vv
+                else:
+                    flat[f"{k}_{vk}"] = vv
+        elif isinstance(v, list):
+            flat[k.lower()] = v
+        else:
+            flat[k] = v
+    return flat
+
+
+def nativefy(obj):
+    if isinstance(obj, dict):
+        return {k: nativefy(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [nativefy(i) for i in obj]
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return nativefy(obj.tolist())
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return 0.0
+    return obj

@@ -41,7 +41,7 @@ class MemoryStore:
             conn.execute("INSERT INTO episodes(session_id,user_msg,tool_calls,result_summary,ts) VALUES(?,?,?,?,?)",
                          (session_id, user_msg[:500], json.dumps(tool_calls, ensure_ascii=False)[:2000], summary[:500], time.time()))
 
-    def recall_episodes(self, query: str, limit: int = 3) -> list[dict]:
+    def recall_episodes(self, query: str = "", limit: int = 3) -> list[dict]:
         words = re.findall(r"[\u4e00-\u9fff\w]{2,}", query)
         if not words:
             return []
@@ -63,7 +63,7 @@ class MemoryStore:
             conn.execute("INSERT OR REPLACE INTO facts(key,value,source,ts) VALUES(?,?,?,?)",
                          (key, value[:2000], source, time.time()))
 
-    def recall_facts(self, query: str, limit: int = 5) -> list[dict]:
+    def recall_facts(self, query: str = "", limit: int = 5) -> list[dict]:
         words = re.findall(r"[\u4e00-\u9fff\w]{2,}", query)
         with sqlite3.connect(str(self.db_path)) as conn:
             rows = conn.execute("SELECT key,value,source FROM facts").fetchall()
@@ -74,6 +74,27 @@ class MemoryStore:
                 results.append({"key": r[0], "value": r[1], "source": r[2], "score": score})
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:limit]
+
+    def save_procedure(self, trigger: str, tool_seq: list):
+        seq_str = json.dumps(tool_seq, ensure_ascii=False)
+        with sqlite3.connect(str(self.db_path)) as conn:
+            existing = conn.execute("SELECT id,success_count FROM procedures WHERE trigger_pattern=?", (trigger,)).fetchone()
+            if existing:
+                conn.execute("UPDATE procedures SET success_count=success_count+1,ts=? WHERE id=?", (time.time(), existing[0]))
+            else:
+                conn.execute("INSERT INTO procedures(trigger_pattern,tool_sequence,ts) VALUES(?,?,?)", (trigger, seq_str, time.time()))
+
+    def recall_procedures(self, query: str = "", limit: int = 3) -> list[dict]:
+        with sqlite3.connect(str(self.db_path)) as conn:
+            rows = conn.execute("SELECT trigger_pattern,tool_sequence,success_count FROM procedures ORDER BY success_count DESC LIMIT 20").fetchall()
+        scored = []
+        for r in rows:
+            pattern_words = re.findall(r"[\u4e00-\u9fff\w]{2,}", r[0])
+            score = sum(1 for w in pattern_words if w in query)
+            if score > 0:
+                scored.append({"trigger": r[0], "tools": r[1], "success": r[2], "score": score})
+        scored.sort(key=lambda x: -x["score"])
+        return scored[:limit]
 
 
 memory = MemoryStore()

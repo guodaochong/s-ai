@@ -8,16 +8,16 @@ import httpx
 import structlog
 
 from app.config import (
-    GLM_API_URL, GLM_TOOLS, ZHIPUAI_API_KEY, logger,
+    GLM_API_URL, GLM_TOOLS, MODEL_FLASH, ZHIPUAI_API_KEY, logger,
 )
 
 
 async def call_llm(
     messages: list[dict],
-    model: str = "GLM-5.1",
+    model: str = MODEL_FLASH,
     use_tools: bool = True,
     max_tokens_override: int = 0,
-    http_timeout: float = 30.0,
+    http_timeout: float = 120.0,
     api_url: str = "",
 ) -> tuple[str, str, list[dict]]:
     url = api_url or GLM_API_URL
