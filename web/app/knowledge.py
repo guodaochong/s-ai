@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import sqlite3
@@ -344,25 +345,27 @@ async def fetch_precipitation_grid(
             "place": "",
         })
 
-    if storm_centers:
-        peak_sc = max(storm_centers, key=lambda s: s["mm"])
-        try:
-            async with httpx.AsyncClient(timeout=10) as gc:
+    geocoded: dict[str, str] = {}
+    async with httpx.AsyncClient(timeout=10) as gc:
+        for sc in storm_centers:
+            loc_key = f"{sc['lat']:.3f},{sc['lon']:.3f}"
+            if loc_key in geocoded:
+                sc["place"] = geocoded[loc_key]
+                continue
+            try:
                 resp = await gc.get(
                     "https://nominatim.openstreetmap.org/reverse",
-                    params={"lat": peak_sc["lat"], "lon": peak_sc["lon"], "format": "json", "zoom": 14, "accept-language": "zh"},
+                    params={"lat": sc["lat"], "lon": sc["lon"], "format": "json", "zoom": 16, "accept-language": "zh"},
                     headers={"User-Agent": "S-AI/1.0"},
                 )
                 addr = resp.json().get("address", {})
-                parts = [addr.get("village"), addr.get("town"), addr.get("county")]
+                parts = [addr.get("village"), addr.get("hamlet"), addr.get("town"), addr.get("county")]
                 place = "·".join([p for p in parts if p]) or addr.get("county", "")
-                peak_sc["place"] = place
-        except Exception as exc:
-            logger.warning(
-                "[Knowledge] reverse geocode failed",
-                lat=peak_sc["lat"], lon=peak_sc["lon"],
-                error=str(exc)[:200],
-            )
+                sc["place"] = place
+                geocoded[loc_key] = place
+            except Exception as exc:
+                logger.warning("[Knowledge] reverse geocode failed", lat=sc["lat"], lon=sc["lon"], error=str(exc)[:200])
+            await asyncio.sleep(0.2)
 
     peak_grid_idx = precip_matrix[peak_idx].index(max(precip_matrix[peak_idx])) if precip_matrix[peak_idx] else 0
     peak_lat = grid_lats[peak_grid_idx] if peak_grid_idx < len(grid_lats) else 0
