@@ -6,6 +6,11 @@ The LLM decides: which tools, what order, what label/icon for each step.
 
 Preset templates serve as a fast-path fallback for common patterns.
 
+Multi-scenario mode: the same pipeline runs N times with different rainfall
+parameters (e.g. 50 mm / 100 mm / 200 mm).  After all scenarios finish, a
+comparison table is emitted so the user can see how flood severity scales
+with rainfall at a glance.
+
 Author: jumpingbirds <guodaochong@gmail.com>
 """
 
@@ -309,3 +314,255 @@ async def execute_pipeline(
     yield sse({"type": "thinking", "agent": "pipeline", "content": f"🎉 {tpl['name']}全部完成，共{total}步"})
     yield sse({"type": "thinking_end", "agent": "pipeline"})
     yield sse({"type": "pipeline_done", "duration_ms": int((time.time() - t0) * 1000), "steps_total": total})
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Multi-Scenario Comparison Engine
+# ══════════════════════════════════════════════════════════════════════
+
+_MULTI_SCENARIO_RE = re.compile(r"对比|比较|多情景|不同.*降雨|分别.*mm|vs|VS")
+
+_METRIC_LABELS: dict[str, str] = {
+    "max_depth_m": "最大水深(m)",
+    "avg_depth_m": "平均水深(m)",
+    "inundated_area_km2": "淹没面积(km²)",
+    "affected_population": "受灾人口(人)",
+    "economic_loss_wan": "经济损失(万元)",
+    "affected_area_km2": "受灾面积(km²)",
+    "peak_runoff_m3s": "洪峰流量(m³/s)",
+    "total_runoff_m3": "径流总量(万m³)",
+    "high_risk_area_km2": "高风险区(km²)",
+    "medium_risk_area_km2": "中风险区(km²)",
+    "low_risk_area_km2": "低风险区(km²)",
+}
+
+_RAINFALL_TO_RETURN_PERIOD: list[tuple[int, int]] = [
+    (280, 200), (220, 100), (180, 50), (130, 20), (100, 10), (80, 5),
+]
+
+
+def _return_period_from_rainfall(mm: int) -> int:
+    for threshold, period in _RAINFALL_TO_RETURN_PERIOD:
+        if mm >= threshold:
+            return period
+    return 5
+
+
+def _extract_scenarios(query: str) -> list[dict[str, Any]] | None:
+    if not _MULTI_SCENARIO_RE.search(query):
+        return None
+
+    rainfalls = [int(x) for x in re.findall(r"(\d+)\s*mm", query, re.IGNORECASE)]
+    if len(rainfalls) >= 2:
+        return [
+            {"id": i, "label": f"{r}mm", "rainfall_mm": r,
+             "return_period": _return_period_from_rainfall(r)}
+            for i, r in enumerate(rainfalls)
+        ]
+
+    periods = [int(x) for x in re.findall(r"(\d+)\s*年一遇", query)]
+    if len(periods) >= 2:
+        mapping = {5: 80, 10: 100, 20: 130, 50: 180, 100: 220, 200: 280}
+        return [
+            {"id": i, "label": f"{p}年一遇", "rainfall_mm": mapping.get(p, 150),
+             "return_period": p}
+            for i, p in enumerate(periods)
+        ]
+
+    if re.search(r"对比|比较|多情景", query):
+        return [
+            {"id": 0, "label": "50mm", "rainfall_mm": 50, "return_period": 5},
+            {"id": 1, "label": "100mm", "rainfall_mm": 100, "return_period": 10},
+            {"id": 2, "label": "200mm", "rainfall_mm": 200, "return_period": 100},
+        ]
+
+    return None
+
+
+def _extract_metrics(tool: str, result: dict[str, Any]) -> dict[str, Any]:
+    m: dict[str, Any] = {}
+    if tool == "flood_sim_3d":
+        for key_out, keys_in in [
+            ("max_depth_m", ["max_depth", "max_depth_m"]),
+            ("avg_depth_m", ["avg_depth", "avg_depth_m"]),
+            ("inundated_area_km2", ["inundated_area", "inundated_area_km2", "flooded_area"]),
+        ]:
+            for k in keys_in:
+                if k in result and result[k]:
+                    m[key_out] = round(float(result[k]), 2)
+                    break
+    elif tool == "flood_assessment":
+        for key_out, keys_in in [
+            ("affected_population", ["affected_population", "population"]),
+            ("economic_loss_wan", ["economic_loss", "loss", "loss_wan"]),
+            ("affected_area_km2", ["affected_area", "area_km2"]),
+        ]:
+            for k in keys_in:
+                if k in result and result[k]:
+                    m[key_out] = float(result[k])
+                    break
+    elif tool == "runoff_compute":
+        for key_out, keys_in in [
+            ("peak_runoff_m3s", ["peak_runoff", "peak_flow"]),
+            ("total_runoff_m3", ["total_volume", "runoff_volume"]),
+        ]:
+            for k in keys_in:
+                if k in result and result[k]:
+                    m[key_out] = round(float(result[k]), 1)
+                    break
+    elif tool == "flood_risk_zones":
+        for key_out, keys_in in [
+            ("high_risk_area_km2", ["high_risk_area", "high_risk_km2"]),
+            ("medium_risk_area_km2", ["medium_risk_area", "medium_risk_km2"]),
+            ("low_risk_area_km2", ["low_risk_area", "low_risk_km2"]),
+        ]:
+            for k in keys_in:
+                if k in result and result[k]:
+                    m[key_out] = round(float(result[k]), 2)
+                    break
+    return m
+
+
+def _build_comparison(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
+    all_keys: set[str] = set()
+    for sc in scenarios:
+        all_keys.update(sc.get("metrics", {}).keys())
+
+    table: list[dict[str, Any]] = []
+    for key in sorted(all_keys, key=lambda k: list(_METRIC_LABELS.keys()).index(k)
+                      if k in _METRIC_LABELS else 999):
+        row: dict[str, Any] = {
+            "metric": _METRIC_LABELS.get(key, key),
+            "key": key,
+            "values": [
+                {"scenario_id": sc["id"], "label": sc["label"],
+                 "value": sc.get("metrics", {}).get(key, 0)}
+                for sc in scenarios
+            ],
+        }
+        if len(scenarios) >= 2:
+            vals = [v["value"] for v in row["values"]]
+            if max(vals) > 0:
+                row["delta_pct"] = round((max(vals) - min(vals)) / max(vals) * 100)
+        table.append(row)
+
+    labels = " vs ".join(sc["label"] for sc in scenarios)
+    return {"summary": f"{labels} 对比完成", "metrics": table}
+
+
+async def execute_multi_scenario(
+    tpl: dict[str, Any],
+    scenarios: list[dict[str, Any]],
+    query: str,
+    location: str,
+    trace: Any,
+    execute_fn: ToolExecutor,
+) -> AsyncIterator[dict]:
+    total_steps = len(tpl["steps"])
+    bbox = _extract_bbox(query)
+
+    yield sse({
+        "type": "multi_scenario_start",
+        "name": tpl["name"],
+        "icon": tpl["icon"],
+        "scenarios": [{"id": s["id"], "label": s["label"]} for s in scenarios],
+        "steps_template": [
+            {"id": i + 1, "tool": s["tool"], "label": s["label"], "icon": s["icon"]}
+            for i, s in enumerate(tpl["steps"])
+        ],
+    })
+
+    yield sse({
+        "type": "thinking_start", "agent": "multi_scenario",
+        "label": f"📊 {tpl['name']} · {len(scenarios)}情景对比",
+    })
+
+    t0 = time.time()
+    all_results: list[dict[str, Any]] = []
+
+    for sc in scenarios:
+        sc_id = sc["id"]
+        sc_label = sc["label"]
+        sc_rainfall = str(sc.get("rainfall_mm", 150))
+        sc_period = sc.get("return_period", _return_period_from_rainfall(int(sc_rainfall)))
+
+        yield sse({
+            "type": "scenario_start", "scenario_id": sc_id, "label": sc_label,
+            "pipeline": {
+                "name": tpl["name"], "icon": tpl["icon"],
+                "steps": [
+                    {"id": i + 1, "tool": s["tool"], "label": s["label"],
+                     "icon": s["icon"], "status": "pending"}
+                    for i, s in enumerate(tpl["steps"])
+                ],
+            },
+        })
+
+        sc_metrics: dict[str, Any] = {}
+
+        for i, step in enumerate(tpl["steps"]):
+            tool = step["tool"]
+            sid = i + 1
+
+            yield sse({
+                "type": "scenario_step", "scenario_id": sc_id,
+                "step_id": sid, "status": "running",
+            })
+            yield sse({
+                "type": "thinking", "agent": "multi_scenario",
+                "content": f"📊 [{sc_label}] {step['icon']} {step['label']}（{sid}/{total_steps}）",
+            })
+
+            args = _build_args(tool, location, sc_rainfall, bbox)
+            if "rainfall_mm" in args:
+                args["rainfall_mm"] = float(sc_rainfall)
+            if "return_period" in args:
+                args["return_period"] = sc_period
+
+            t_step = time.time()
+            try:
+                result = await execute_fn(tool, args, query)
+            except Exception as exc:
+                result = {"error": str(exc)[:200]}
+            elapsed = int((time.time() - t_step) * 1000)
+
+            server = TOOL_TO_SERVER.get(tool, "")
+
+            if isinstance(result, dict) and "error" not in result:
+                yield sse({
+                    "type": "tool_start", "server": server, "tool": tool,
+                    "step": sid, "scenario_id": sc_id,
+                })
+                yield sse({
+                    "type": "tool_result", "server": server, "tool": tool,
+                    "result": result, "elapsed_ms": elapsed, "scenario_id": sc_id,
+                })
+                yield sse({
+                    "type": "scenario_step", "scenario_id": sc_id,
+                    "step_id": sid, "status": "done",
+                })
+                metrics = _extract_metrics(tool, result)
+                if metrics:
+                    sc_metrics.update(metrics)
+            else:
+                err = result.get("error", "未知错误") if isinstance(result, dict) else str(result)[:200]
+                yield sse({
+                    "type": "scenario_step", "scenario_id": sc_id,
+                    "step_id": sid, "status": "error", "error": err,
+                })
+
+        yield sse({"type": "scenario_done", "scenario_id": sc_id, "metrics": sc_metrics})
+        all_results.append({"id": sc_id, "label": sc_label, "metrics": sc_metrics})
+
+    comparison = _build_comparison(all_results)
+    yield sse({
+        "type": "thinking", "agent": "multi_scenario",
+        "content": f"🎉 {comparison['summary']}，共{len(scenarios)}情景 × {total_steps}步",
+    })
+    yield sse({"type": "thinking_end", "agent": "multi_scenario"})
+    yield sse({
+        "type": "multi_scenario_done",
+        "comparison": comparison,
+        "scenarios": all_results,
+        "duration_ms": int((time.time() - t0) * 1000),
+    })
