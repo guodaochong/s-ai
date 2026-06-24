@@ -34,10 +34,10 @@ __email__ = "guodaochong@gmail.com"
 logger = structlog.get_logger()
 
 
-_HSV_LOWER = np.array([85, 30, 40])
-_HSV_UPPER = np.array([140, 255, 255])
+_HSV_LOWER = np.array([95, 60, 50])
+_HSV_UPPER = np.array([130, 255, 220])
 
-_MIN_AREA_RATIO = 0.005
+_MIN_AREA_RATIO = 0.01
 
 
 @dataclass
@@ -65,9 +65,24 @@ class VideoAnalysisResult:
 
 def _detect_water(hsv: np.ndarray) -> tuple[np.ndarray, float]:
     mask = cv2.inRange(hsv, _HSV_LOWER, _HSV_UPPER)
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    kernel = np.ones((7, 7), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    cleaned = np.zeros_like(mask)
+    min_pix = int(mask.size * _MIN_AREA_RATIO)
+    for i in range(1, num_labels):
+        area = stats[i, cv2.CC_STAT_AREA]
+        w = stats[i, cv2.CC_STAT_WIDTH]
+        h = stats[i, cv2.CC_STAT_HEIGHT]
+        if area < min_pix:
+            continue
+        if w > 0 and h > 0 and max(w, h) / min(w, h) > 8:
+            continue
+        cleaned[labels == i] = 255
+
+    mask = cleaned
     ratio = float(np.count_nonzero(mask)) / mask.size
     return mask, ratio
 
