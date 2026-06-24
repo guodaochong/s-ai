@@ -48,16 +48,16 @@ _COT_PROMPT = """你是水利空间分析专家。用户提出了一个需要空
 2. description: 该步骤的推理说明(20-50字)
 3. icon: 单个emoji
 4. map_action: 地图操作，必须是以下类型之一：
-   - highlight_region: 高亮一个矩形区域(需提供bbox[w,s,e,n]、color、label)
-   - flow_arrows: 画水流/影响方向箭头(需提供arrows数组，每个{from:[lon,lat],to:[lon,lat]})
-   - markers: 标记关键点(需提供points数组，每个{coord:[lon,lat],label,color})
-   - circle: 风险圈(需提供center:[lon,lat],radius_km,color,label)
-   - polygon: 多边形区域(需提供coords数组[[lon,lat],...],color,label)
+   - highlight_region: 高亮矩形区域(参数bbox[w,s,e,n],color,label)
+   - flow_arrows: 水流方向箭头(参数arrows,每个含from坐标和to坐标)
+   - markers: 标记关键点(参数points,每个含coord坐标,label,color)
+   - circle: 风险圈(参数center坐标,radius_km,color,label)
+   - polygon: 多边形(参数coords坐标数组,color,label)
 
-坐标范围参考：中国经度73-135，纬度18-53。请基于实际地理位置给出合理坐标。
+坐标范围参考：中国经度73-135，纬度18-53。基于实际地理位置给出合理坐标。
 
-仅返回JSON：
-{{"steps":[{{"title":"","description":"","icon":"","map_action":{{"type":"","params":{{}}}}}}],"conclusion":"最终结论(30-50字)"}}"""
+仅返回JSON（不要markdown代码块）：
+{{"steps":[{{"title":"","description":"","icon":"","map_action":{{"type":"","params":{{}}}}}}],"conclusion":""}}"""
 
 
 def detect_spatial_cot(query: str) -> bool:
