@@ -57,3 +57,5 @@ test_*.py
 # SAM model checkpoint
 web/segment/models/*.pth
 *.pth
+
+yolov8n.pt
