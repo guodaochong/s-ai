@@ -119,7 +119,9 @@ export function useSSE() {
       chatStore.multiScenarioActive = false
     },
     disaster_assess: (data) => {
-      chatStore.disasterAssessment = data.assessment || null
+      const a = data.assessment || {}
+      if (data.image) a.image_url = `/api/uploads_img/${encodeURIComponent(data.image)}`
+      chatStore.disasterAssessment = a
     },
     text: (data) => {
       chatStore.updateLastBotMessage(data.content || '')

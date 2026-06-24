@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File as FastAPIFile, UploadFile
+from fastapi.responses import FileResponse
 
 from app.config import DATA_DIR, UPLOAD_IMG_DIR
 from app.multimodal import analyze_image
@@ -79,3 +80,12 @@ async def analyze_image_api(image_base64: str = "", file_path: str = ""):
         return {"error": "Provide image_base64 or file_path"}
     result = await analyze_image(image_base64)
     return {"analysis": result}
+
+
+@router.get("/api/uploads_img/{filename}")
+async def get_upload_img(filename: str):
+    safe = Path(filename).name
+    path = UPLOAD_IMG_DIR / safe
+    if not path.exists():
+        return {"error": "not found"}
+    return FileResponse(str(path))

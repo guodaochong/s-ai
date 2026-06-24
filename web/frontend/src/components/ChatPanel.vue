@@ -432,6 +432,10 @@ function closeExportMenu(e: MouseEvent) {
         <span class="dc-sev-badge">{{ chatStore.disasterAssessment.severity || '?' }}级</span>
       </div>
       <div class="dc-body">
+        <div v-if="chatStore.disasterAssessment.image_url" class="dc-image" @click="lightboxUrl = chatStore.disasterAssessment.image_url">
+          <img :src="chatStore.disasterAssessment.image_url" />
+          <div class="dc-image-overlay">🔍 点击放大</div>
+        </div>
         <div class="dc-row">
           <div class="dc-cell">
             <div class="dc-cell-label">灾害类型</div>
@@ -1053,6 +1057,33 @@ function closeExportMenu(e: MouseEvent) {
   border: 1px solid rgba(239, 68, 68, .3);
 }
 .dc-body { padding: 12px 14px; }
+.dc-image {
+  position: relative;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  max-height: 200px;
+}
+.dc-image img {
+  width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+  display: block;
+}
+.dc-image-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 4px 10px;
+  background: linear-gradient(transparent, rgba(0,0,0,.7));
+  color: #fff;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity .2s;
+}
+.dc-image:hover .dc-image-overlay { opacity: 1; }
 .dc-row {
   display: flex;
   gap: 10px;
