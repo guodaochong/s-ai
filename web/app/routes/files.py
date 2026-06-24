@@ -12,11 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File as FastAPIFile, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.requests import Request
+from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
 
 from app.config import DATA_DIR, UPLOAD_IMG_DIR
 from app.multimodal import analyze_image
 from app.video_analysis import analyze_video
+from app.report import generate_report
 
 router = APIRouter()
 
@@ -112,3 +114,16 @@ async def analyze_video_stream(filename: str, context: str = ""):
                 yield event
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@router.post("/api/generate_report")
+async def generate_report_api(request: Request):
+    body = await request.json()
+    html = await generate_report(
+        tool_results=body.get("tool_results"),
+        disaster_assessment=body.get("disaster_assessment"),
+        video_analysis=body.get("video_analysis"),
+        comparison=body.get("comparison"),
+        user_query=body.get("user_query", ""),
+    )
+    return HTMLResponse(content=html)
