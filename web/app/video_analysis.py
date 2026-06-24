@@ -87,6 +87,7 @@ class FrameResult:
     contours_count: int
     dominant_hue: float
     detections: list[dict] = field(default_factory=list)
+    glmv: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -161,23 +162,58 @@ def extract_frames(video_path: str | Path, interval_s: float = 3.0) -> list[tupl
     return frames
 
 
-def analyze_frames(frames: list[tuple[int, float, np.ndarray]]) -> list[FrameResult]:
+_FRAME_ANALYSIS_PROMPT = """分析这个视频帧画面。识别水体并评估。
+
+返回JSON：{"water_type":"河流/湖泊/水库/洪水/排水渠/无水体","water_state":"平静/流动/湍急/溢流","water_ratio":0.0-1.0,"objects_in_water":["人","车辆","船只","漂浮物"],"environment":"城市/农田/山地/荒野","hazards":[],"risk_level":1-5,"summary":"一句话"}"""
+
+
+async def analyze_frame_glmv(frame: np.ndarray, ts: float) -> dict[str, Any]:
+    from app.config import MODEL_VISION
+    from app.llm import call_llm
+    import re, json
+
+    b64 = _resize_image_b64(_frame_to_b64(frame, quality=70))
+    messages = [{"role": "user", "content": [
+        {"type": "text", "text": _FRAME_ANALYSIS_PROMPT},
+        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+    ]}]
+    try:
+        content, _, _ = await call_llm(
+            messages, model=MODEL_VISION, use_tools=False, max_tokens_override=800,
+        )
+        cleaned = content.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
+            cleaned = re.sub(r'\s*```$', '', cleaned)
+        match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+    except Exception as e:
+        logger.warning("[Video] GLM-4V frame analysis failed", ts=ts, error=str(e)[:100])
+    return {"water_ratio": 0.0, "water_type": "未知", "summary": "分析失败"}
+
+
+async def analyze_frames_async(frames: list[tuple[int, float, np.ndarray]]) -> list[FrameResult]:
     results: list[FrameResult] = []
     prev_ratio = 0.0
     yolo = _get_yolo()
 
     for fidx, ts, frame in frames:
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        mask, ratio = _detect_water(hsv)
+        glmv = await analyze_frame_glmv(frame, ts)
+        ratio = float(glmv.get("water_ratio", 0))
         changed = ratio - prev_ratio
 
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        significant = [c for c in contours if cv2.contourArea(c) > mask.size * _MIN_AREA_RATIO]
+        annotated = frame.copy()
+        if frame.shape[1] > 1280:
+            scale = 1280 / frame.shape[1]
+            annotated = cv2.resize(annotated, None, fx=scale, fy=scale)
 
-        annotated = _annotate_frame(frame, mask)
-        for c in significant:
-            x, y, w, h = cv2.boundingRect(c)
-            cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 100), 2)
+        wa = glmv.get("water_type", "")
+        ws = glmv.get("water_state", "")
+        wr = int(ratio * 100)
+        cv2.rectangle(annotated, (0, 0), (annotated.shape[1], 40), (0, 0, 0), -1)
+        cv2.putText(annotated, f"{wa} {ws} {wr}%", (10, 28),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
         detections: list[dict] = []
         if yolo is not None:
@@ -187,10 +223,8 @@ def analyze_frames(frames: list[tuple[int, float, np.ndarray]]) -> list[FrameRes
                 color = (0, 0, 255) if d["class"] == "person" else (255, 100, 0)
                 cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
                 label = f'{d["class"]} {d["confidence"]:.0%}'
-                cv2.putText(annotated, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-
-        hue_vals = hsv[mask > 0, 0]
-        dom_hue = float(np.mean(hue_vals)) if len(hue_vals) > 0 else 0.0
+                cv2.putText(annotated, label, (x1, y1 - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
         results.append(FrameResult(
             timestamp=round(ts, 1),
@@ -198,9 +232,10 @@ def analyze_frames(frames: list[tuple[int, float, np.ndarray]]) -> list[FrameRes
             water_ratio=round(ratio, 4),
             water_changed=round(changed, 4),
             annotated_b64=_frame_to_b64(annotated),
-            contours_count=len(significant),
-            dominant_hue=round(dom_hue, 1),
+            contours_count=0,
+            dominant_hue=0.0,
             detections=detections,
+            glmv=glmv,
         ))
         prev_ratio = ratio
 
@@ -317,10 +352,13 @@ async def analyze_video(
         yield sse({"type": "video_analysis_error", "error": "无法提取视频帧"})
         return
 
-    yield sse({"type": "thinking", "agent": "video", "content": "🌊 正在进行水体检测..."})
-    results = analyze_frames(frames)
+    yield sse({"type": "thinking", "agent": "video", "content": "🧠 GLM-4V + YOLOv8 逐帧分析中..."})
+    results = await analyze_frames_async(frames)
 
+    best_assessment: dict[str, Any] = {}
     for i, r in enumerate(results):
+        if r.glmv and r.glmv.get("risk_level", 0) > best_assessment.get("risk_level", 0):
+            best_assessment = r.glmv
         yield sse({
             "type": "video_frame_result",
             "frame_idx": i,
@@ -331,6 +369,7 @@ async def analyze_video(
             "contours_count": r.contours_count,
             "frame_b64": r.annotated_b64,
             "detections": r.detections,
+            "glmv": r.glmv,
         })
 
     trend, delta = _compute_trend(results)
@@ -344,13 +383,11 @@ async def analyze_video(
         "frame_count": len(results),
     })
 
-    glmv_data: dict[str, Any] = {}
-    if use_glmv:
-        yield sse({"type": "thinking", "agent": "video", "content": "🧠 GLM-4V 正在分析关键帧..."})
-        glmv_data = await glmv_video_assess(frames, user_context)
-        if glmv_data.get("assessment"):
-            yield sse({"type": "video_glmv", "assessment": glmv_data["assessment"]})
-        yield sse({"type": "thinking", "agent": "video", "content": f"✅ GLM-4V分析完成: {glmv_data.get('summary', '')[:100]}"})
+    if best_assessment:
+        yield sse({"type": "video_glmv", "assessment": best_assessment})
+
+    summaries = [f"[{r.timestamp}s] {r.glmv.get('summary', '')}" for r in results if r.glmv.get("summary")]
+    glmv_summary = " | ".join(summaries) if summaries else f"共{len(results)}帧，最大水面占比{round(max_ratio*100,1)}%"
 
     yield sse({"type": "thinking", "agent": "video", "content": f"🎉 视频分析完成，共{len(results)}帧，水体趋势：{trend}"})
     yield sse({
@@ -360,6 +397,6 @@ async def analyze_video(
         "max_water_ratio": round(max_ratio, 4),
         "trend": trend,
         "trend_delta": round(delta, 4),
-        "glmv_summary": glmv_data.get("summary", ""),
+        "glmv_summary": glmv_summary,
         "elapsed_ms": int((time.time() - t0) * 1000),
     })
