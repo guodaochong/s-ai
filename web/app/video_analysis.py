@@ -39,6 +39,43 @@ _HSV_UPPER = np.array([130, 255, 220])
 
 _MIN_AREA_RATIO = 0.01
 
+_YOLO_MODEL = None
+_WATER_CLASSES = {0: "person", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck", 8: "boat"}
+
+
+def _get_yolo():
+    global _YOLO_MODEL
+    if _YOLO_MODEL is not None:
+        return _YOLO_MODEL
+    try:
+        from ultralytics import YOLO
+        _YOLO_MODEL = YOLO("yolov8n.pt")
+        logger.info("[Video] YOLOv8n loaded on GPU")
+        return _YOLO_MODEL
+    except Exception as e:
+        logger.warning("[Video] YOLO unavailable, HSV-only mode", error=str(e)[:100])
+        return None
+
+
+def _yolo_detect(frame: np.ndarray) -> list[dict]:
+    model = _get_yolo()
+    if model is None:
+        return []
+    results = model(frame, verbose=False, conf=0.4)
+    dets: list[dict] = []
+    for r in results:
+        for box in r.boxes:
+            cls_id = int(box.cls[0])
+            if cls_id not in _WATER_CLASSES:
+                continue
+            x1, y1, x2, y2 = [round(float(v)) for v in box.xyxy[0]]
+            dets.append({
+                "class": _WATER_CLASSES[cls_id],
+                "confidence": round(float(box.conf[0]), 2),
+                "bbox": [x1, y1, x2, y2],
+            })
+    return dets
+
 
 @dataclass
 class FrameResult:
@@ -49,6 +86,7 @@ class FrameResult:
     annotated_b64: str
     contours_count: int
     dominant_hue: float
+    detections: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -126,6 +164,7 @@ def extract_frames(video_path: str | Path, interval_s: float = 3.0) -> list[tupl
 def analyze_frames(frames: list[tuple[int, float, np.ndarray]]) -> list[FrameResult]:
     results: list[FrameResult] = []
     prev_ratio = 0.0
+    yolo = _get_yolo()
 
     for fidx, ts, frame in frames:
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -140,6 +179,16 @@ def analyze_frames(frames: list[tuple[int, float, np.ndarray]]) -> list[FrameRes
             x, y, w, h = cv2.boundingRect(c)
             cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 100), 2)
 
+        detections: list[dict] = []
+        if yolo is not None:
+            detections = _yolo_detect(frame)
+            for d in detections:
+                x1, y1, x2, y2 = d["bbox"]
+                color = (0, 0, 255) if d["class"] == "person" else (255, 100, 0)
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+                label = f'{d["class"]} {d["confidence"]:.0%}'
+                cv2.putText(annotated, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+
         hue_vals = hsv[mask > 0, 0]
         dom_hue = float(np.mean(hue_vals)) if len(hue_vals) > 0 else 0.0
 
@@ -151,6 +200,7 @@ def analyze_frames(frames: list[tuple[int, float, np.ndarray]]) -> list[FrameRes
             annotated_b64=_frame_to_b64(annotated),
             contours_count=len(significant),
             dominant_hue=round(dom_hue, 1),
+            detections=detections,
         ))
         prev_ratio = ratio
 
@@ -280,6 +330,7 @@ async def analyze_video(
             "water_changed": r.water_changed,
             "contours_count": r.contours_count,
             "frame_b64": r.annotated_b64,
+            "detections": r.detections,
         })
 
     trend, delta = _compute_trend(results)
