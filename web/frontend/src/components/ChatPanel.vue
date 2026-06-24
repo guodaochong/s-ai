@@ -116,6 +116,10 @@ function isMaxInRow(metric: any, val: number): boolean {
   return val > 0 && val === Math.max(...vals)
 }
 
+function sevColor(sev: number): string {
+  return ['', '#22c55e', '#eab308', '#f97316', '#ef4444', '#dc2626'][sev] || '#64748b'
+}
+
 function uploadFile(e: Event) {
   const input = e.target as HTMLInputElement
   if (!input.files?.length) return
@@ -375,6 +379,68 @@ function closeExportMenu(e: MouseEvent) {
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="chatStore.disasterAssessment" class="disaster-card" :class="'sev-' + (chatStore.disasterAssessment.severity || 1)">
+      <div class="dc-header">
+        <span class="dc-icon">🚨</span>
+        <span class="dc-title">灾情智能评估</span>
+        <span class="dc-sev-badge">{{ chatStore.disasterAssessment.severity || '?' }}级</span>
+      </div>
+      <div class="dc-body">
+        <div class="dc-row">
+          <div class="dc-cell">
+            <div class="dc-cell-label">灾害类型</div>
+            <div class="dc-cell-val">{{ chatStore.disasterAssessment.disaster_type || '—' }}</div>
+          </div>
+          <div class="dc-cell">
+            <div class="dc-cell-label">估算水深</div>
+            <div class="dc-cell-val">{{ chatStore.disasterAssessment.water_depth_m ?? '—' }}m</div>
+          </div>
+          <div class="dc-cell">
+            <div class="dc-cell-label">受影响人口</div>
+            <div class="dc-cell-val">{{ chatStore.disasterAssessment.estimated_affected_population ?? '—' }}</div>
+          </div>
+        </div>
+
+        <div v-if="chatStore.disasterAssessment.depth_basis" class="dc-detail">
+          <span class="dc-detail-label">📏 水深依据：</span>{{ chatStore.disasterAssessment.depth_basis }}
+        </div>
+
+        <div v-if="chatStore.disasterAssessment.affected_buildings?.length" class="dc-section">
+          <div class="dc-section-title">🏚️ 受损建筑</div>
+          <div class="dc-tags">
+            <span v-for="(b, bi) in chatStore.disasterAssessment.affected_buildings" :key="'bld_'+bi" class="dc-tag">
+              {{ b.type }} ×{{ b.count }} <small>{{ b.status }}</small>
+            </span>
+          </div>
+        </div>
+
+        <div v-if="chatStore.disasterAssessment.affected_roads" class="dc-detail">
+          <span class="dc-detail-label">🛣️ 道路设施：</span>{{ chatStore.disasterAssessment.affected_roads }}
+        </div>
+
+        <div v-if="chatStore.disasterAssessment.hazards?.length" class="dc-section">
+          <div class="dc-section-title">⚠️ 安全隐患</div>
+          <div class="dc-tags">
+            <span v-for="(h, hi) in chatStore.disasterAssessment.hazards" :key="'hz_'+hi" class="dc-tag dc-tag-warn">{{ h }}</span>
+          </div>
+        </div>
+
+        <div v-if="chatStore.disasterAssessment.recommended_actions?.length" class="dc-section">
+          <div class="dc-section-title">📋 建议措施</div>
+          <div class="dc-actions">
+            <div v-for="(a, ai) in chatStore.disasterAssessment.recommended_actions" :key="'act_'+ai" class="dc-action">
+              <span class="dc-action-num">{{ ai + 1 }}</span>{{ a }}
+            </div>
+          </div>
+        </div>
+
+        <div class="dc-footer">
+          <span class="dc-conf">置信度 {{ ((chatStore.disasterAssessment.confidence || 0) * 100).toFixed(0) }}%</span>
+          <span class="dc-summary">{{ chatStore.disasterAssessment.summary || '' }}</span>
         </div>
       </div>
     </div>
@@ -909,6 +975,114 @@ function closeExportMenu(e: MouseEvent) {
   color: #fbbf24;
   font-weight: 700;
 }
+
+.disaster-card {
+  margin: 8px 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(239, 68, 68, .25);
+  background: rgba(239, 68, 68, .03);
+}
+.disaster-card.sev-1 { border-color: rgba(34, 197, 94, .25); background: rgba(34, 197, 94, .03); }
+.disaster-card.sev-2 { border-color: rgba(234, 179, 8, .25); background: rgba(234, 179, 8, .03); }
+.disaster-card.sev-3 { border-color: rgba(249, 115, 22, .25); background: rgba(249, 115, 22, .03); }
+.disaster-card.sev-4 { border-color: rgba(239, 68, 68, .3); background: rgba(239, 68, 68, .05); }
+.disaster-card.sev-5 { border-color: rgba(220, 38, 38, .4); background: rgba(220, 38, 38, .08); }
+.dc-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.dc-icon { font-size: 18px; }
+.dc-title { font-size: 14px; font-weight: 700; color: #fca5a5; }
+.dc-sev-badge {
+  margin-left: auto;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(239, 68, 68, .15);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, .3);
+}
+.dc-body { padding: 12px 14px; }
+.dc-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.dc-cell {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(0,0,0,.25);
+  text-align: center;
+}
+.dc-cell-label { font-size: 10px; color: #94a3b8; margin-bottom: 3px; }
+.dc-cell-val { font-size: 16px; font-weight: 700; color: #e2e8f0; }
+.dc-detail {
+  font-size: 12px;
+  color: #cbd5e1;
+  margin: 6px 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(0,0,0,.15);
+}
+.dc-detail-label { color: #94a3b8; }
+.dc-section { margin: 8px 0; }
+.dc-section-title { font-size: 12px; font-weight: 600; color: #fca5a5; margin-bottom: 5px; }
+.dc-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.dc-tag {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  background: rgba(255,255,255,.06);
+  color: #cbd5e1;
+  border: 1px solid rgba(255,255,255,.08);
+}
+.dc-tag small { color: #f87171; }
+.dc-tag-warn {
+  background: rgba(239, 68, 68, .1);
+  border-color: rgba(239, 68, 68, .2);
+  color: #fca5a5;
+}
+.dc-actions { display: flex; flex-direction: column; gap: 5px; }
+.dc-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #e2e8f0;
+  background: rgba(0,0,0,.15);
+}
+.dc-action-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, .2);
+  color: #fca5a5;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.dc-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,.06);
+  font-size: 11px;
+}
+.dc-conf { color: #94a3b8; white-space: nowrap; }
+.dc-summary { color: #cbd5e1; }
 .th-line.done { color: var(--accent3); }
 .tool-badge {
   display: inline-flex;

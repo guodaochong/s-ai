@@ -118,6 +118,9 @@ export function useSSE() {
       chatStore.comparisonResult = data.comparison || null
       chatStore.multiScenarioActive = false
     },
+    disaster_assess: (data) => {
+      chatStore.disasterAssessment = data.assessment || null
+    },
     text: (data) => {
       chatStore.updateLastBotMessage(data.content || '')
     },

@@ -25,6 +25,8 @@ export const useChatStore = defineStore('chat', () => {
   const pipelineSteps = ref<{ id: number; tool: string; label: string; icon: string; status: string }[]>([])
   const pipelineActive = ref(false)
 
+  const disasterAssessment = ref<any>(null)
+
   const multiScenarioActive = ref(false)
   const multiScenarioName = ref('')
   const multiScenarioIcon = ref('')
@@ -150,6 +152,7 @@ export const useChatStore = defineStore('chat', () => {
     pipelineName.value = ''
     pipelineSteps.value = []
     pipelineActive.value = false
+    disasterAssessment.value = null
     multiScenarioActive.value = false
     multiScenarioName.value = ''
     multiScenarioIcon.value = ''
@@ -193,6 +196,7 @@ export const useChatStore = defineStore('chat', () => {
     pipelineName, pipelineSteps, pipelineActive,
     multiScenarioActive, multiScenarioName, multiScenarioIcon,
     scenarios, comparisonResult,
+    disasterAssessment,
     recentHistory,
     addUserMessage, addBotMessage, updateLastBotMessage,
     addThinkingLine, startThinking, closeThinking, markThinkingDone, clearThinking,
