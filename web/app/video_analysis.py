@@ -103,7 +103,9 @@ class VideoAnalysisResult:
 
 
 def _detect_water(hsv: np.ndarray) -> tuple[np.ndarray, float]:
-    mask = cv2.inRange(hsv, _HSV_LOWER, _HSV_UPPER)
+    mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+    for lower, upper in _HSV_RANGES:
+        mask |= cv2.inRange(hsv, lower, upper)
     kernel = np.ones((7, 7), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
@@ -135,6 +137,37 @@ def _annotate_frame(frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
 def _frame_to_b64(frame: np.ndarray, quality: int = 70) -> str:
     _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
     return base64.b64encode(buf).decode()
+
+
+_FONT_CACHE: dict[int, Any] = {}
+
+
+def _get_font(size: int = 22) -> Any:
+    from PIL import ImageFont
+    if size not in _FONT_CACHE:
+        for path in ["C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/simhei.ttf", "C:/Windows/Fonts/simsun.ttc"]:
+            if Path(path).exists():
+                _FONT_CACHE[size] = ImageFont.truetype(path, size)
+                break
+        else:
+            _FONT_CACHE[size] = ImageFont.load_default()
+    return _FONT_CACHE[size]
+
+
+def _draw_text_cn(img: np.ndarray, text: str, pos: tuple[int, int], color=(255, 255, 0), size: int = 22) -> np.ndarray:
+    from PIL import Image, ImageDraw
+    pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(pil)
+    rgb = (color[2], color[1], color[0]) if len(color) == 3 else color
+    draw.text(pos, text, font=_get_font(size), fill=rgb)
+    return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+
+
+_HSV_RANGES = [
+    (np.array([95, 50, 40]), np.array([130, 255, 220])),
+    (np.array([35, 40, 30]), np.array([85, 255, 200])),
+    (np.array([10, 40, 20]), np.array([30, 200, 150])),
+]
 
 
 def extract_frames(video_path: str | Path, interval_s: float = 3.0) -> list[tuple[int, float, np.ndarray]]:
@@ -222,8 +255,7 @@ async def analyze_frames_async(frames: list[tuple[int, float, np.ndarray]]) -> l
         ws = glmv.get("water_state", "")
         wr = int(ratio * 100)
         cv2.rectangle(annotated, (0, 0), (annotated.shape[1], 40), (0, 0, 0), -1)
-        cv2.putText(annotated, f"{wa} {ws} {wr}%", (10, 28),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        annotated = _draw_text_cn(annotated, f"{wa} {ws} {wr}%", (10, 8), color=(0, 255, 255), size=22)
 
         detections: list[dict] = []
         if yolo is not None:
@@ -232,9 +264,7 @@ async def analyze_frames_async(frames: list[tuple[int, float, np.ndarray]]) -> l
                 x1, y1, x2, y2 = d["bbox"]
                 color = (0, 0, 255) if d["class"] == "person" else (255, 100, 0)
                 cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-                label = f'{d["class"]} {d["confidence"]:.0%}'
-                cv2.putText(annotated, label, (x1, y1 - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                annotated = _draw_text_cn(annotated, f'{d["class"]} {d["confidence"]:.0%}', (x1, y1 - 22), color=color, size=16)
 
         results.append(FrameResult(
             timestamp=round(ts, 1),
