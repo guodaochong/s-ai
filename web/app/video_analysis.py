@@ -202,11 +202,21 @@ async def analyze_frames_async(frames: list[tuple[int, float, np.ndarray]]) -> l
         glmv = await analyze_frame_glmv(frame, ts)
         ratio = float(glmv.get("water_ratio", 0))
         changed = ratio - prev_ratio
+        has_water = ratio > 0.01 and glmv.get("water_type", "无") != "无水体"
 
         annotated = frame.copy()
         if frame.shape[1] > 1280:
             scale = 1280 / frame.shape[1]
             annotated = cv2.resize(annotated, None, fx=scale, fy=scale)
+
+        if has_water:
+            hsv = cv2.cvtColor(annotated, cv2.COLOR_BGR2HSV)
+            mask = cv2.inRange(hsv, _HSV_LOWER, _HSV_UPPER)
+            kernel = np.ones((7, 7), np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
+            overlay = annotated.copy()
+            overlay[mask > 0] = [0, 200, 255]
+            annotated = cv2.addWeighted(annotated, 0.6, overlay, 0.4, 0)
 
         wa = glmv.get("water_type", "")
         ws = glmv.get("water_state", "")
