@@ -377,8 +377,15 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
 
         # ── 1. Enrich: image prefix → vision analysis ──
         message, img_events = await _resolve_image_prefix(message)
+        has_disaster_assess = False
         for evt in img_events:
+            if isinstance(evt, dict) and evt.get("type") == "disaster_assess":
+                has_disaster_assess = True
             yield sse(evt)
+
+        if has_disaster_assess:
+            yield sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": 0, "trace": trace.to_dict()})
+            return
 
         # ── 2. Parse conversation history ──
         parsed_history = _parse_history(history)
