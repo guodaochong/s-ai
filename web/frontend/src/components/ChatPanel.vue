@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, watch } from 'vue'
+import { ref, nextTick, watch, computed } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useSSE } from '@/composables/useSSE'
 
@@ -338,6 +338,47 @@ const suggestions = [
   'DEM坡度分析', '流域提取',
 ]
 
+const hasAnalysisData = computed(() => {
+  return chatStore.allExportData.length > 0
+    || chatStore.disasterAssessment
+    || chatStore.videoAnalysis
+    || chatStore.comparisonResult
+})
+
+async function generateReport() {
+  if (chatStore.isStreaming) return
+  const lastUser = [...chatStore.messages].reverse().find(m => m.role === 'user')
+  const body = {
+    tool_results: chatStore.allExportData,
+    disaster_assessment: chatStore.disasterAssessment,
+    video_analysis: chatStore.videoAnalysis ? {
+      duration: chatStore.videoAnalysis.duration,
+      frame_count: chatStore.videoAnalysis.frames.length,
+      max_water_ratio: chatStore.videoAnalysis.maxWaterRatio,
+      trend: chatStore.videoAnalysis.trend,
+    } : null,
+    comparison: chatStore.comparisonResult,
+    user_query: lastUser?.content || '',
+  }
+  try {
+    const resp = await fetch('/api/generate_report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const html = await resp.text()
+    const w = window.open('', '_blank')
+    if (w) {
+      w.document.write(html)
+      w.document.close()
+    } else {
+      chatStore.addBotMessage('⚠️ 请允许弹出窗口以预览报告')
+    }
+  } catch {
+    chatStore.addBotMessage('⚠️ 报告生成失败，请确保后端已启动')
+  }
+}
+
 function closeExportMenu(e: MouseEvent) {
   if (showExportMenu.value && !(e.target as HTMLElement).closest('.export-wrap')) {
     showExportMenu.value = false
@@ -607,6 +648,7 @@ function closeExportMenu(e: MouseEvent) {
         @click="askSuggestion(s)"
       >{{ s }}</span>
       <span class="suggestion auto-pipeline" @click="autoPipeline">auto-pipeline</span>
+      <span v-if="hasAnalysisData" class="suggestion gen-report" @click="generateReport">📋 生成报告</span>
     </div>
 
     <div v-if="pendingImage || imgUploading" class="img-preview-bar">
@@ -1524,8 +1566,18 @@ function closeExportMenu(e: MouseEvent) {
   color: var(--accent2);
 }
 .suggestion.auto-pipeline:hover {
-  background: rgba(124, 58, 237, .1);
-  border-color: var(--accent2);
+  background: rgba(168, 85, 237, .25);
+  border-color: rgba(168, 85, 237, .5);
+}
+.suggestion.gen-report {
+  border-color: rgba(34, 197, 94, .3);
+  background: rgba(34, 197, 94, .08);
+  color: #4ade80;
+  font-weight: 600;
+}
+.suggestion.gen-report:hover {
+  background: rgba(34, 197, 94, .2);
+  border-color: rgba(34, 197, 94, .5);
 }
 .export-menu {
   position: absolute;
