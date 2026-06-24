@@ -36,6 +36,7 @@ from app.config import (
 from app.knowledge import CITY_COORDS
 from app.dispatcher import handle_internal_tool
 from app.pipeline import detect_pipeline, execute_pipeline, _extract_scenarios, execute_multi_scenario
+from app.spatial_cot import detect_spatial_cot, generate_spatial_cot
 from app.llm import call_llm
 from app.mcp_client import cached_mcp_call
 from app.multimodal import analyze_image, assess_disaster
@@ -443,7 +444,17 @@ async def chat_stream(q: str, history: str = "", workflows: str = ""):
                 yield sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": 0, "tools_called": len(tools_used), "trace": trace.to_dict()})
                 return
 
-        # ── 4b. Pipeline detection — AI-powered multi-step spatial deduction ──
+        # ── 4b. Spatial Chain-of-Thought — visual reasoning on map ──
+        if detect_spatial_cot(message):
+            loc = _extract_location(message)
+            from app.pipeline import _extract_bbox
+            cot_bbox = _extract_bbox(message)
+            async for event in generate_spatial_cot(message, loc, cot_bbox):
+                yield event
+            yield sse({"type": "done", "duration_ms": int((time.time() - t_start) * 1000), "react_steps": 0, "trace": trace.to_dict()})
+            return
+
+        # ── 4c. Pipeline detection — AI-powered multi-step spatial deduction ──
         yield sse({"type": "thinking_start", "agent": "planner", "label": "🔬 分析任务复杂度"})
         pipeline_tpl = await detect_pipeline(message)
         yield sse({"type": "thinking_end", "agent": "planner"})
