@@ -59,3 +59,5 @@ web/segment/models/*.pth
 *.pth
 
 yolov8n.pt
+
+sam-3d-objects/
