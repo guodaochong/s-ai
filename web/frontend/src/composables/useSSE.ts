@@ -1,4 +1,5 @@
 import { useChatStore } from '@/stores/chat'
+import { useMapStore } from '@/stores/map'
 import { useToolRenderer } from '@/composables/useToolRenderer'
 import type { SSEEvent } from '@/types'
 
@@ -122,6 +123,30 @@ export function useSSE() {
       const a = data.assessment || {}
       if (data.image) a.image_url = `/api/uploads_img/${encodeURIComponent(data.image)}`
       chatStore.disasterAssessment = a
+    },
+    spatial_cot_start: () => {
+      const mapStore = useMapStore()
+      mapStore.clearCoTLayers()
+      chatStore.cotSteps = []
+      chatStore.cotActive = true
+      chatStore.cotConclusion = ''
+    },
+    spatial_cot_step: (data) => {
+      if (data.map_action && data.map_action.type !== 'none') {
+        const mapStore = useMapStore()
+        mapStore.addCoTAction(data.map_action)
+      }
+      chatStore.cotSteps.push({
+        id: data.step_id,
+        title: data.title || '',
+        description: data.description || '',
+        icon: data.icon || '📍',
+        mapAction: data.map_action,
+      })
+    },
+    spatial_cot_done: (data) => {
+      chatStore.cotConclusion = data.conclusion || ''
+      chatStore.cotActive = false
     },
     text: (data) => {
       chatStore.updateLastBotMessage(data.content || '')

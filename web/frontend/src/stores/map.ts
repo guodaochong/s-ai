@@ -80,5 +80,80 @@ export const useMapStore = defineStore('map', () => {
     layers.value = []
   }
 
-  return { layers, setMap, getMap, addLayer, addGeoJSON, addPoints, removeLayerById, fitBounds, clearAll }
+  const cotLayerIds: string[] = []
+
+  function clearCoTLayers() {
+    cotLayerIds.forEach(id => removeLayerById(id))
+    cotLayerIds.length = 0
+  }
+
+  function addCoTAction(action: any) {
+    if (!mapInstance) return
+    const type = action?.type
+    const p = action?.params || {}
+    clearCoTLayers()
+
+    if (type === 'highlight_region' && p.bbox) {
+      const [w, s, e, n] = p.bbox
+      const color = p.color || '#00d4ff'
+      const rect = L.rectangle([[s, w], [n, e]], {
+        color, fillColor: color, fillOpacity: p.opacity || 0.2, weight: 2,
+      })
+      if (p.label) rect.bindPopup(p.label)
+      const id = addLayer(rect, p.label || '高亮区域')
+      cotLayerIds.push(id)
+      fitBounds([[s, w], [n, e]], 0.3)
+    }
+    else if (type === 'flow_arrows' && p.arrows) {
+      p.arrows.forEach((a: any) => {
+        if (a.from && a.to) {
+          const line = L.polyline([a.from, a.to], {
+            color: p.color || '#fbbf24', weight: 3, dashArray: '10,8', opacity: 0.8,
+          })
+          const id = addLayer(line, '流向')
+          cotLayerIds.push(id)
+          if (a.to) {
+            const arrow = L.circleMarker(a.to, {
+              radius: 5, fillColor: p.color || '#fbbf24', color: p.color || '#fbbf24', fillOpacity: 1,
+            })
+            const id2 = addLayer(arrow, '流向端点')
+            cotLayerIds.push(id2)
+          }
+        }
+      })
+    }
+    else if (type === 'markers' && p.points) {
+      p.points.forEach((pt: any) => {
+        if (pt.coord) {
+          const mk = L.circleMarker(pt.coord, {
+            radius: 8, fillColor: pt.color || '#ef4444', color: pt.color || '#ef4444', fillOpacity: 0.8,
+          })
+          if (pt.label) mk.bindPopup(pt.label)
+          const id = addLayer(mk, pt.label || '标记点')
+          cotLayerIds.push(id)
+        }
+      })
+    }
+    else if (type === 'circle' && p.center) {
+      const c = L.circle(p.center, {
+        radius: (p.radius_km || 5) * 1000,
+        color: p.color || '#f97316', fillColor: p.color || '#f97316', fillOpacity: 0.15, weight: 2,
+      })
+      if (p.label) c.bindPopup(p.label)
+      const id = addLayer(c, p.label || '风险圈')
+      cotLayerIds.push(id)
+      fitBounds(c.getBounds(), 0.3)
+    }
+    else if (type === 'polygon' && p.coords) {
+      const poly = L.polygon(p.coords, {
+        color: p.color || '#22c55e', fillColor: p.color || '#22c55e', fillOpacity: 0.2, weight: 2,
+      })
+      if (p.label) poly.bindPopup(p.label)
+      const id = addLayer(poly, p.label || '区域')
+      cotLayerIds.push(id)
+      fitBounds(poly.getBounds(), 0.3)
+    }
+  }
+
+  return { layers, setMap, getMap, addLayer, addGeoJSON, addPoints, removeLayerById, fitBounds, clearAll, clearCoTLayers, addCoTAction }
 })

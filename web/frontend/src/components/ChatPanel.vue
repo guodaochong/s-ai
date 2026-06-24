@@ -641,6 +641,29 @@ function closeExportMenu(e: MouseEvent) {
       </div>
     </div>
 
+    <div v-if="chatStore.cotSteps.length > 0" class="cot-card">
+      <div class="cot-header">
+        <span class="cot-icon">🗺️</span>
+        <span class="cot-title">空间思维链</span>
+        <span v-if="chatStore.cotActive" class="cot-pulse">推理中...</span>
+      </div>
+      <div class="cot-steps">
+        <div v-for="(s, si) in chatStore.cotSteps" :key="'cot_'+si" :class="['cot-step', si === chatStore.cotSteps.length - 1 && chatStore.cotActive ? 'active' : '']">
+          <div class="cot-step-header">
+            <span class="cot-step-num">{{ s.id }}</span>
+            <span class="cot-step-icon">{{ s.icon }}</span>
+            <span class="cot-step-title">{{ s.title }}</span>
+            <span v-if="s.mapAction && s.mapAction.type !== 'none'" class="cot-step-map-tag">📍 地图</span>
+          </div>
+          <div class="cot-step-desc">{{ s.description }}</div>
+        </div>
+      </div>
+      <div v-if="chatStore.cotConclusion" class="cot-conclusion">
+        <span class="cot-conclusion-icon">✅</span>
+        {{ chatStore.cotConclusion }}
+      </div>
+    </div>
+
     <div class="suggestions">
       <span
         v-for="s in suggestions" :key="s"
@@ -1389,6 +1412,93 @@ function closeExportMenu(e: MouseEvent) {
 .va-glmv-title { font-size: 12px; font-weight: 600; color: #c4b5fd; margin-bottom: 5px; }
 .va-glmv-body { display: flex; gap: 12px; font-size: 11px; color: #cbd5e1; flex-wrap: wrap; }
 .va-glmv-summary { font-size: 11px; color: #94a3b8; margin-top: 5px; }
+
+.cot-card {
+  margin: 8px 0;
+  border-radius: 12px;
+  border: 1px solid rgba(34, 197, 94, .2);
+  background: rgba(34, 197, 94, .03);
+  overflow: hidden;
+}
+.cot-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.cot-icon { font-size: 18px; }
+.cot-title { font-size: 14px; font-weight: 700; color: #4ade80; }
+.cot-pulse {
+  margin-left: auto;
+  font-size: 11px;
+  color: #fbbf24;
+  animation: pulse-fade 1s infinite;
+}
+@keyframes pulse-fade { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+.cot-steps { padding: 8px 14px; }
+.cot-step {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  margin: 4px 0;
+  border-radius: 8px;
+  background: rgba(0,0,0,.15);
+  border-left: 3px solid rgba(34, 197, 94, .3);
+  transition: all .3s;
+}
+.cot-step.active {
+  border-left-color: #fbbf24;
+  background: rgba(250, 204, 21, .06);
+  box-shadow: 0 0 12px rgba(250, 204, 21, .1);
+}
+.cot-step-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.cot-step-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(34, 197, 94, .2);
+  color: #4ade80;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.cot-step-icon { font-size: 14px; }
+.cot-step-title { font-size: 13px; font-weight: 600; color: #e2e8f0; }
+.cot-step-map-tag {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(0, 212, 255, .1);
+  border: 1px solid rgba(0, 212, 255, .2);
+  color: #67e8f9;
+}
+.cot-step-desc {
+  font-size: 12px;
+  color: #94a3b8;
+  padding-left: 26px;
+}
+.cot-conclusion {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 14px;
+  margin: 0 14px 10px;
+  border-radius: 8px;
+  background: rgba(34, 197, 94, .08);
+  border: 1px solid rgba(34, 197, 94, .2);
+  font-size: 13px;
+  color: #bbf7d0;
+}
 .th-line.done { color: var(--accent3); }
 .tool-badge {
   display: inline-flex;
