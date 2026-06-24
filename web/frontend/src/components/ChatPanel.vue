@@ -131,6 +131,37 @@ function sevColor(sev: number): string {
   return ['', '#22c55e', '#eab308', '#f97316', '#ef4444', '#dc2626'][sev] || '#64748b'
 }
 
+function fmtDepth(val: any): string {
+  if (val == null) return '—'
+  if (typeof val === 'number') return val + 'm'
+  if (typeof val === 'string') return /\d/.test(val) ? val + (val.includes('m') ? '' : 'm') : val
+  if (typeof val === 'object') {
+    if (val.average != null) return `${val.average}m`
+    if (val.maximum != null && val.minimum != null) return `${val.minimum}-${val.maximum}m`
+    if (val.maximum != null) return `${val.maximum}m`
+    const vals = Object.values(val).filter((v: any) => typeof v === 'number')
+    if (vals.length) return `${Math.max(...vals)}m`
+  }
+  return String(val)
+}
+
+function fmtBasis(val: any): string {
+  if (val == null) return ''
+  if (typeof val === 'string') return val
+  if (Array.isArray(val)) return val.join('、')
+  if (typeof val === 'object') {
+    return Object.entries(val).map(([k, v]) => `${k}: ${v}`).join('；')
+  }
+  return String(val)
+}
+
+function fmtPop(val: any): string {
+  if (val == null) return '—'
+  if (typeof val === 'number') return val > 10000 ? (val / 10000).toFixed(1) + '万' : String(val)
+  if (typeof val === 'string') return val
+  return String(val)
+}
+
 function uploadFile(e: Event) {
   const input = e.target as HTMLInputElement
   if (!input.files?.length) return
@@ -408,16 +439,16 @@ function closeExportMenu(e: MouseEvent) {
           </div>
           <div class="dc-cell">
             <div class="dc-cell-label">估算水深</div>
-            <div class="dc-cell-val">{{ chatStore.disasterAssessment.water_depth_m ?? '—' }}m</div>
+            <div class="dc-cell-val">{{ fmtDepth(chatStore.disasterAssessment.water_depth_m) }}</div>
           </div>
           <div class="dc-cell">
             <div class="dc-cell-label">受影响人口</div>
-            <div class="dc-cell-val">{{ chatStore.disasterAssessment.estimated_affected_population ?? '—' }}</div>
+            <div class="dc-cell-val">{{ fmtPop(chatStore.disasterAssessment.estimated_affected_population) }}</div>
           </div>
         </div>
 
         <div v-if="chatStore.disasterAssessment.depth_basis" class="dc-detail">
-          <span class="dc-detail-label">📏 水深依据：</span>{{ chatStore.disasterAssessment.depth_basis }}
+          <span class="dc-detail-label">📏 水深依据：</span>{{ fmtBasis(chatStore.disasterAssessment.depth_basis) }}
         </div>
 
         <div v-if="chatStore.disasterAssessment.affected_buildings?.length" class="dc-section">
