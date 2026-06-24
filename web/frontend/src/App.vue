@@ -51,7 +51,7 @@ onUnmounted(() => {
 <style scoped>
 .app-grid {
   display: grid;
-  grid-template-columns: 260px 1fr 460px;
+  grid-template-columns: 260px 1fr 560px;
   grid-template-rows: 56px 1fr auto;
   height: 100vh;
   gap: 1px;
