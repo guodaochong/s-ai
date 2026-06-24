@@ -104,6 +104,18 @@ function askSuggestion(text: string) {
   })
 }
 
+function formatMetricVal(v: number): string {
+  if (!v && v !== 0) return '—'
+  if (v >= 10000) return (v / 10000).toFixed(1) + '万'
+  if (Number.isInteger(v)) return v.toString()
+  return v.toFixed(2)
+}
+
+function isMaxInRow(metric: any, val: number): boolean {
+  const vals = metric.values.map((v: any) => v.value)
+  return val > 0 && val === Math.max(...vals)
+}
+
 function uploadFile(e: Event) {
   const input = e.target as HTMLInputElement
   if (!input.files?.length) return
@@ -319,6 +331,51 @@ function closeExportMenu(e: MouseEvent) {
           </div>
           <span v-if="si < chatStore.pipelineSteps.length - 1" class="pd-arrow">→</span>
         </template>
+      </div>
+    </div>
+
+    <div v-if="chatStore.scenarios.length > 0" class="multi-scenario">
+      <div class="ms-header">
+        <span class="ms-icon">{{ chatStore.multiScenarioIcon || '📊' }}</span>
+        <span class="ms-name">{{ chatStore.multiScenarioName }}</span>
+        <span class="ms-badge">{{ chatStore.scenarios.length }}情景对比</span>
+      </div>
+      <div class="ms-cards">
+        <div v-for="sc in chatStore.scenarios" :key="'sc_'+sc.id" class="ms-card" :class="{ active: sc.steps.some(s => s.status === 'running') }">
+          <div class="msc-label" :class="{ done: sc.steps.every(s => s.status === 'done') }">{{ sc.label }}</div>
+          <div class="msc-nodes">
+            <template v-for="(step, si) in sc.steps" :key="'ms_'+sc.id+'_'+si">
+              <div :class="['msc-node', step.status]">
+                <span class="msc-node-icon">{{ step.icon }}</span>
+                <span class="msc-node-st">{{
+                  step.status === 'done' ? '✅' : step.status === 'running' ? '🔄' : step.status === 'error' ? '❌' : '⏳'
+                }}</span>
+              </div>
+              <span v-if="si < sc.steps.length - 1" class="msc-arrow">→</span>
+            </template>
+          </div>
+        </div>
+      </div>
+      <div v-if="chatStore.comparisonResult" class="ms-comparison">
+        <div class="msc-table-title">📊 {{ chatStore.comparisonResult.summary }}</div>
+        <div class="msc-table-wrap">
+          <table class="msc-table">
+            <thead>
+              <tr>
+                <th>指标</th>
+                <th v-for="sc in chatStore.scenarios" :key="'ct_'+sc.id">{{ sc.label }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(metric, mi) in chatStore.comparisonResult.metrics" :key="metric.key">
+                <td class="msc-metric-name">{{ metric.metric }}</td>
+                <td v-for="v in metric.values" :key="v.scenario_id" :class="{ 'msc-max': isMaxInRow(metric, v.value) }">
+                  {{ formatMetricVal(v.value) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -721,6 +778,137 @@ function closeExportMenu(e: MouseEvent) {
 .pd-label { font-size: 11px; color: #cbd5e1; }
 .pd-status { font-size: 13px; }
 .pd-arrow { color: rgba(255,255,255,.2); font-size: 14px; }
+
+.multi-scenario {
+  margin: 8px 0;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(168, 85, 247, .2);
+  background: rgba(168, 85, 247, .04);
+}
+.ms-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #c4b5fd;
+}
+.ms-badge {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(168, 85, 247, .15);
+  border: 1px solid rgba(168, 85, 247, .3);
+  color: #d8b4fe;
+}
+.ms-cards {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.ms-card {
+  flex: 1;
+  min-width: 200px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(0,0,0,.2);
+  transition: all .3s;
+}
+.ms-card.active {
+  border-color: rgba(250, 204, 21, .4);
+  box-shadow: 0 0 12px rgba(250, 204, 21, .1);
+}
+.msc-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #a5b4fc;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.msc-label.done { color: #4ade80; }
+.msc-nodes {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.msc-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,.06);
+  background: rgba(255,255,255,.02);
+  min-width: 36px;
+  transition: all .3s;
+}
+.msc-node.running {
+  border-color: rgba(250, 204, 21, .5);
+  background: rgba(250, 204, 21, .08);
+  animation: pulse 1s infinite;
+}
+.msc-node.done {
+  border-color: rgba(74, 222, 128, .4);
+  background: rgba(74, 222, 128, .06);
+}
+.msc-node.error {
+  border-color: rgba(248, 113, 113, .4);
+  background: rgba(248, 113, 113, .06);
+}
+.msc-node-icon { font-size: 16px; }
+.msc-node-st { font-size: 11px; }
+.msc-arrow { color: rgba(255,255,255,.15); font-size: 12px; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .6; }
+}
+.ms-comparison {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,.06);
+}
+.msc-table-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #c4b5fd;
+  margin-bottom: 8px;
+}
+.msc-table-wrap { overflow-x: auto; }
+.msc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.msc-table th {
+  padding: 6px 10px;
+  text-align: center;
+  color: #a5b4fc;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(168, 85, 247, .2);
+  white-space: nowrap;
+}
+.msc-table td {
+  padding: 5px 10px;
+  text-align: center;
+  color: #cbd5e1;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.msc-table td.msc-metric-name {
+  text-align: left;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+.msc-table td.msc-max {
+  color: #fbbf24;
+  font-weight: 700;
+}
 .th-line.done { color: var(--accent3); }
 .tool-badge {
   display: inline-flex;

@@ -138,6 +138,7 @@ function triggerAnalysis(type: string) {
   const bboxStr = `[${w},${s},${e},${n}]`
   const messages: Record<string, string> = {
     pipeline: `对区域${bboxStr}进行暴雨洪水全链路推演`,
+    compare: `对比区域${bboxStr}在50mm 100mm 200mm降雨下的暴雨洪水全过程`,
     flood: `分析区域${bboxStr}暴雨150mm会不会淹`,
     building: `识别区域${bboxStr}的建筑`,
     precip: `展示区域${bboxStr}的降雨过程`,
@@ -205,6 +206,7 @@ function addDemoLayer() {
       <div class="dp-bbox">bbox: [{{ drawnBbox.map(v => v.toFixed(3)).join(', ') }}]</div>
       <div class="dp-actions">
         <button class="dp-btn dp-pipeline" @click="triggerAnalysis('pipeline')">🤖 全链路推演</button>
+        <button class="dp-btn dp-compare" @click="triggerAnalysis('compare')">📊 多情景对比</button>
         <button class="dp-btn" @click="triggerAnalysis('flood')">🌊 会淹吗？</button>
         <button class="dp-btn" @click="triggerAnalysis('building')">🏙️ 识别建筑</button>
         <button class="dp-btn" @click="triggerAnalysis('precip')">🌧️ 降雨过程</button>
@@ -561,5 +563,16 @@ function addDemoLayer() {
 .draw-panel .dp-pipeline:hover {
   background: rgba(0, 255, 136, 0.18);
   border-color: rgba(0, 255, 136, 0.6);
+}
+.draw-panel .dp-compare {
+  border-color: rgba(168, 85, 247, 0.4);
+  background: rgba(168, 85, 247, 0.08);
+  color: #c4b5fd;
+  font-weight: 600;
+  grid-column: 1 / -1;
+}
+.draw-panel .dp-compare:hover {
+  background: rgba(168, 85, 247, 0.18);
+  border-color: rgba(168, 85, 247, 0.6);
 }
 </style>

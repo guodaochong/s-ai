@@ -47,10 +47,13 @@ export function useSSE() {
     },
     tool_result: (data) => {
       if (data.result) {
-        chatStore.addToolResult(data.tool, data.server, data.result, data.elapsed_ms || 0)
-        const rendered = toolRenderer.render(data.tool, data.server, data.result)
-        chatStore.addToolHtml(rendered.html)
-        rendered.mapActions.forEach(fn => fn())
+        const isFirstScenario = data.scenario_id === undefined || data.scenario_id === 0
+        if (isFirstScenario) {
+          chatStore.addToolResult(data.tool, data.server, data.result, data.elapsed_ms || 0)
+          const rendered = toolRenderer.render(data.tool, data.server, data.result)
+          chatStore.addToolHtml(rendered.html)
+          rendered.mapActions.forEach(fn => fn())
+        }
       }
     },
     tool_error: (data) => {
@@ -76,6 +79,44 @@ export function useSSE() {
     },
     pipeline_done: () => {
       chatStore.pipelineActive = false
+    },
+    multi_scenario_start: (data) => {
+      chatStore.multiScenarioActive = true
+      chatStore.multiScenarioName = data.name || ''
+      chatStore.multiScenarioIcon = data.icon || '📊'
+      chatStore.comparisonResult = null
+      const tpl = (data.steps_template || []) as any[]
+      chatStore.scenarios = (data.scenarios || []).map((s: any) => ({
+        id: s.id,
+        label: s.label,
+        steps: tpl.map((t, i) => ({ id: i + 1, tool: t.tool, label: t.label, icon: t.icon, status: 'pending' })),
+        metrics: {},
+      }))
+    },
+    scenario_start: (data) => {
+      const sc = chatStore.scenarios.find((s: any) => s.id === data.scenario_id)
+      if (sc) {
+        if (data.pipeline?.steps) {
+          sc.steps = data.pipeline.steps.map((s: any, i: number) => ({
+            id: i + 1, tool: s.tool, label: s.label, icon: s.icon, status: 'pending',
+          }))
+        }
+      }
+    },
+    scenario_step: (data) => {
+      const sc = chatStore.scenarios.find((s: any) => s.id === data.scenario_id)
+      if (sc) {
+        const step = sc.steps.find((s: any) => s.id === data.step_id)
+        if (step) step.status = data.status || 'pending'
+      }
+    },
+    scenario_done: (data) => {
+      const sc = chatStore.scenarios.find((s: any) => s.id === data.scenario_id)
+      if (sc) sc.metrics = data.metrics || {}
+    },
+    multi_scenario_done: (data) => {
+      chatStore.comparisonResult = data.comparison || null
+      chatStore.multiScenarioActive = false
     },
     text: (data) => {
       chatStore.updateLastBotMessage(data.content || '')

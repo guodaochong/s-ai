@@ -25,6 +25,19 @@ export const useChatStore = defineStore('chat', () => {
   const pipelineSteps = ref<{ id: number; tool: string; label: string; icon: string; status: string }[]>([])
   const pipelineActive = ref(false)
 
+  const multiScenarioActive = ref(false)
+  const multiScenarioName = ref('')
+  const multiScenarioIcon = ref('')
+  const scenarios = ref<{
+    id: number; label: string;
+    steps: { id: number; tool: string; label: string; icon: string; status: string }[];
+    metrics: Record<string, number>;
+  }[]>([])
+  const comparisonResult = ref<{
+    summary: string;
+    metrics: { metric: string; key: string; values: { scenario_id: number; label: string; value: number }[]; delta_pct?: number }[];
+  } | null>(null)
+
   const recentHistory = computed(() => history.value.slice(-10))
 
   function addUserMessage(content: string) {
@@ -137,6 +150,11 @@ export const useChatStore = defineStore('chat', () => {
     pipelineName.value = ''
     pipelineSteps.value = []
     pipelineActive.value = false
+    multiScenarioActive.value = false
+    multiScenarioName.value = ''
+    multiScenarioIcon.value = ''
+    scenarios.value = []
+    comparisonResult.value = null
     totalTools.value = 0
     totalMs.value = 0
   }
