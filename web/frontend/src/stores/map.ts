@@ -87,11 +87,16 @@ export const useMapStore = defineStore('map', () => {
     cotLayerIds.length = 0
   }
 
-  function addCoTAction(action: any) {
+  function _ll(coord: any): [number, number] {
+    if (Array.isArray(coord) && coord.length >= 2) return [coord[1], coord[0]]
+    return [0, 0]
+  }
+
+  function addCoTAction(action: any, accumulate = true) {
     if (!mapInstance) return
     const type = action?.type
     const p = action?.params || {}
-    clearCoTLayers()
+    if (!accumulate) clearCoTLayers()
 
     if (type === 'highlight_region' && p.bbox) {
       const [w, s, e, n] = p.bbox
@@ -107,25 +112,26 @@ export const useMapStore = defineStore('map', () => {
     else if (type === 'flow_arrows' && p.arrows) {
       p.arrows.forEach((a: any) => {
         if (a.from && a.to) {
-          const line = L.polyline([a.from, a.to], {
+          const from = _ll(a.from)
+          const to = _ll(a.to)
+          const line = L.polyline([from, to], {
             color: p.color || '#fbbf24', weight: 3, dashArray: '10,8', opacity: 0.8,
           })
           const id = addLayer(line, '流向')
           cotLayerIds.push(id)
-          if (a.to) {
-            const arrow = L.circleMarker(a.to, {
-              radius: 5, fillColor: p.color || '#fbbf24', color: p.color || '#fbbf24', fillOpacity: 1,
-            })
-            const id2 = addLayer(arrow, '流向端点')
-            cotLayerIds.push(id2)
-          }
+          const arrow = L.circleMarker(to, {
+            radius: 5, fillColor: p.color || '#fbbf24', color: p.color || '#fbbf24', fillOpacity: 1,
+          })
+          const id2 = addLayer(arrow, '流向端点')
+          cotLayerIds.push(id2)
         }
       })
     }
     else if (type === 'markers' && p.points) {
       p.points.forEach((pt: any) => {
         if (pt.coord) {
-          const mk = L.circleMarker(pt.coord, {
+          const c = _ll(pt.coord)
+          const mk = L.circleMarker(c, {
             radius: 8, fillColor: pt.color || '#ef4444', color: pt.color || '#ef4444', fillOpacity: 0.8,
           })
           if (pt.label) mk.bindPopup(pt.label)
@@ -135,7 +141,8 @@ export const useMapStore = defineStore('map', () => {
       })
     }
     else if (type === 'circle' && p.center) {
-      const c = L.circle(p.center, {
+      const center = _ll(p.center)
+      const c = L.circle(center, {
         radius: (p.radius_km || 5) * 1000,
         color: p.color || '#f97316', fillColor: p.color || '#f97316', fillOpacity: 0.15, weight: 2,
       })
@@ -145,7 +152,8 @@ export const useMapStore = defineStore('map', () => {
       fitBounds(c.getBounds(), 0.3)
     }
     else if (type === 'polygon' && p.coords) {
-      const poly = L.polygon(p.coords, {
+      const latlngs = p.coords.map((c: any) => _ll(c))
+      const poly = L.polygon(latlngs, {
         color: p.color || '#22c55e', fillColor: p.color || '#22c55e', fillOpacity: 0.2, weight: 2,
       })
       if (p.label) poly.bindPopup(p.label)

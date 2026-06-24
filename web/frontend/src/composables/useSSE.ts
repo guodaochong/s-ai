@@ -134,7 +134,7 @@ export function useSSE() {
     spatial_cot_step: (data) => {
       if (data.map_action && data.map_action.type !== 'none') {
         const mapStore = useMapStore()
-        mapStore.addCoTAction(data.map_action)
+        mapStore.addCoTAction(data.map_action, true)
       }
       chatStore.cotSteps.push({
         id: data.step_id,
