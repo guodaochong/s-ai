@@ -69,6 +69,17 @@ function removePendingImage() {
   }
 }
 
+function quickImageAction(action: string) {
+  if (!pendingImage.value || chatStore.isStreaming) return
+  const prompts: Record<string, string> = {
+    disaster: '评估这张灾情照片的淹没情况和损失',
+    reconstruct: '重建这个建筑的3D模型',
+    analyze: '分析这张图片的内容',
+  }
+  inputText.value = prompts[action] || ''
+  handleSend()
+}
+
 function scrollToBottom() {
   if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
 }
@@ -464,6 +475,9 @@ function closeExportMenu(e: MouseEvent) {
           <div class="img-thumb-overlay">🔍 点击放大</div>
         </div>
         <span class="img-name">{{ pendingImage!.filename }}</span>
+        <button class="img-quick img-quick-disaster" @click="quickImageAction('disaster')">🚨 灾情评估</button>
+        <button class="img-quick" @click="quickImageAction('reconstruct')">🏗️ 3D重建</button>
+        <button class="img-quick" @click="quickImageAction('analyze')">🔍 通用分析</button>
         <button class="img-remove" @click="removePendingImage">✕</button>
       </template>
     </div>
@@ -1373,6 +1387,34 @@ function closeExportMenu(e: MouseEvent) {
 .img-remove:hover {
   background: rgba(239, 68, 68, .25);
   border-color: rgba(239, 68, 68, .5);
+}
+.img-quick {
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.1);
+  background: rgba(255,255,255,.04);
+  color: #cbd5e1;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all .15s;
+  flex-shrink: 0;
+}
+.img-quick:hover {
+  background: rgba(0, 212, 255, .12);
+  border-color: rgba(0, 212, 255, .3);
+  color: #00d4ff;
+}
+.img-quick-disaster {
+  border-color: rgba(239, 68, 68, .3);
+  background: rgba(239, 68, 68, .08);
+  color: #fca5a5;
+  font-weight: 600;
+}
+.img-quick-disaster:hover {
+  background: rgba(239, 68, 68, .2);
+  border-color: rgba(239, 68, 68, .5);
+  color: #fff;
 }
 .input-btn.active {
   border-color: var(--accent);
