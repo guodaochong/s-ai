@@ -114,6 +114,7 @@ async def _resolve_image_prefix(message: str) -> tuple[str, list[dict]]:
             {"type": "thinking_start", "agent": "vision", "label": "🚨 灾情智能评估"},
         ]
         if "error" in assessment:
+            events.append({"type": "disaster_assess", "assessment": {"error": assessment["error"], "severity": 0, "confidence": 0}})
             events.append({"type": "thinking", "agent": "vision", "content": f"❌ {assessment['error']}"})
         else:
             sev = assessment.get("severity", 0)

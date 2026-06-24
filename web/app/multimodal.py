@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import re
 from typing import Any
@@ -14,11 +15,30 @@ __author__ = "jumpingbirds"
 __email__ = "guodaochong@gmail.com"
 
 
+def _resize_image_b64(image_b64: str, max_dim: int = 1024, quality: int = 80) -> str:
+    """Downscale an image so its base64 payload stays within GLM-4V limits."""
+    try:
+        from PIL import Image
+        raw = base64.b64decode(image_b64)
+        img = Image.open(io.BytesIO(raw))
+        if max(img.size) > max_dim:
+            ratio = max_dim / max(img.size)
+            img = img.resize((int(img.size[0] * ratio), int(img.size[1] * ratio)), Image.LANCZOS)
+        if img.mode == "RGBA":
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality)
+        return base64.b64encode(buf.getvalue()).decode()
+    except Exception as e:
+        logger.warning("[Vision] resize failed, using raw", error=str(e)[:100])
+        return image_b64
+
+
 async def analyze_image(image_b64: str, prompt: str = "") -> str:
     messages = [
         {"role": "user", "content": [
             {"type": "text", "text": prompt or "分析这张与水利/地理相关的图片，识别关键信息（地形、水域、建筑、植被等），给出结构化描述。"},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64[:50000]}"}},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{_resize_image_b64(image_b64)}"}},
         ]},
     ]
     try:
@@ -63,7 +83,7 @@ async def assess_disaster(image_b64: str, user_context: str = "") -> dict[str, A
     messages = [
         {"role": "user", "content": [
             {"type": "text", "text": full_prompt},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{_resize_image_b64(image_b64)}"}},
         ]},
     ]
     try:
