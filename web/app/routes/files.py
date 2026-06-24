@@ -12,10 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File as FastAPIFile, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.config import DATA_DIR, UPLOAD_IMG_DIR
 from app.multimodal import analyze_image
+from app.video_analysis import analyze_video
 
 router = APIRouter()
 
@@ -82,10 +83,32 @@ async def analyze_image_api(image_base64: str = "", file_path: str = ""):
     return {"analysis": result}
 
 
-@router.get("/api/uploads_img/{filename}")
-async def get_upload_img(filename: str):
+UPLOAD_VIDEO_DIR = DATA_DIR / "uploads_video"
+UPLOAD_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@router.post("/api/upload_video")
+async def upload_video(file: UploadFile = FastAPIFile(...)):
+    ext = Path(file.filename or "video.mp4").suffix.lower()
+    if ext not in (".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm"):
+        return {"error": f"Unsupported video format: {ext}"}
+    ts = int(time.time() * 1000)
+    dest = UPLOAD_VIDEO_DIR / f"{ts}_{file.filename}"
+    content = await file.read()
+    dest.write_bytes(content)
+    return {"filename": dest.name, "size_bytes": len(content), "path": str(dest)}
+
+
+@router.get("/api/analyze_video")
+async def analyze_video_stream(filename: str, context: str = ""):
     safe = Path(filename).name
-    path = UPLOAD_IMG_DIR / safe
-    if not path.exists():
-        return {"error": "not found"}
-    return FileResponse(str(path))
+    video_path = UPLOAD_VIDEO_DIR / safe
+    if not video_path.exists():
+        return {"error": "Video not found"}
+
+    async def gen():
+        async for event in analyze_video(video_path, interval_s=3.0, use_glmv=True, user_context=context):
+            if isinstance(event, str):
+                yield event
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
