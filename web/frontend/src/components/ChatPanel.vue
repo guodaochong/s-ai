@@ -11,6 +11,7 @@ const showExportMenu = ref(false)
 const pendingImage = ref<{ url: string; filename: string } | null>(null)
 const lightboxUrl = ref<string | null>(null)
 const imgUploading = ref(false)
+const videoUploading = ref(false)
 
 function handleSend() {
   if ((!inputText.value.trim() && !pendingImage.value) || chatStore.isStreaming) return
@@ -78,6 +79,79 @@ function quickImageAction(action: string) {
   }
   inputText.value = prompts[action] || ''
   handleSend()
+}
+
+async function handleVideoSelect(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (!input.files?.length) return
+  const file = input.files[0]
+  input.value = ''
+  if (!file.type.startsWith('video/')) {
+    chatStore.addBotMessage('⚠️ 请选择视频文件')
+    return
+  }
+  videoUploading.value = true
+  chatStore.addBotMessage(`📹 正在上传视频: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`)
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    const resp = await fetch('/api/upload_video', { method: 'POST', body: fd })
+    const data = await resp.json()
+    if (data.error) {
+      chatStore.addBotMessage(`⚠️ 上传失败: ${data.error}`)
+      return
+    }
+    chatStore.videoAnalysis = { active: true, filename: data.filename, duration: 0, frames: [], maxWaterRatio: 0, trend: '', trendDelta: 0, glmvAssessment: null, summary: '' }
+    chatStore.isStreaming = true
+
+    const ctx = inputText.value.trim()
+    const url = `/api/analyze_video?filename=${encodeURIComponent(data.filename)}&context=${encodeURIComponent(ctx)}`
+    const es = new EventSource(url)
+    es.onmessage = (ev) => {
+      let d: any
+      try { d = JSON.parse(ev.data) } catch { return }
+      const va = chatStore.videoAnalysis
+      if (!va) return
+
+      switch (d.type) {
+        case 'video_info':
+          va.duration = d.duration_s
+          break
+        case 'video_frame_result':
+          va.frames.push({ timestamp: d.timestamp, waterRatio: d.water_ratio, waterChanged: d.water_changed, frameB64: d.frame_b64 })
+          break
+        case 'video_stats':
+          va.maxWaterRatio = d.max_water_ratio
+          va.trend = d.trend
+          va.trendDelta = d.trend_delta
+          break
+        case 'video_glmv':
+          va.glmvAssessment = d.assessment
+          break
+        case 'video_analysis_done':
+          va.duration = d.duration_s
+          va.summary = d.glmv_summary
+          va.active = false
+          chatStore.isStreaming = false
+          es.close()
+          break
+        case 'video_analysis_error':
+          chatStore.addBotMessage(`⚠️ 视频分析失败: ${d.error}`)
+          chatStore.isStreaming = false
+          es.close()
+          break
+      }
+    }
+    es.onerror = () => {
+      es.close()
+      if (chatStore.videoAnalysis) chatStore.videoAnalysis.active = false
+      chatStore.isStreaming = false
+    }
+  } catch {
+    chatStore.addBotMessage('⚠️ 视频上传失败，请确保后端已启动')
+  } finally {
+    videoUploading.value = false
+  }
 }
 
 function scrollToBottom() {
@@ -491,6 +565,41 @@ function closeExportMenu(e: MouseEvent) {
       </div>
     </div>
 
+    <div v-if="chatStore.videoAnalysis" class="video-analysis-card">
+      <div class="va-header">
+        <span class="va-icon">📹</span>
+        <span class="va-title">水务视频分析</span>
+        <span v-if="chatStore.videoAnalysis.trend" class="va-trend-badge" :class="chatStore.videoAnalysis.trend">
+          {{ chatStore.videoAnalysis.trend === 'rising' ? '📈 水位上涨' : chatStore.videoAnalysis.trend === 'falling' ? '📉 水位下降' : '➡️ 水体稳定' }}
+        </span>
+      </div>
+      <div class="va-body">
+        <div class="va-stats">
+          <div class="va-stat"><span class="va-stat-label">视频时长</span><span class="va-stat-val">{{ chatStore.videoAnalysis.duration }}s</span></div>
+          <div class="va-stat"><span class="va-stat-label">分析帧数</span><span class="va-stat-val">{{ chatStore.videoAnalysis.frames.length }}</span></div>
+          <div class="va-stat"><span class="va-stat-label">最大水面占比</span><span class="va-stat-val">{{ (chatStore.videoAnalysis.maxWaterRatio * 100).toFixed(1) }}%</span></div>
+        </div>
+        <div v-if="chatStore.videoAnalysis.frames.length" class="va-frames">
+          <div v-for="(f, fi) in chatStore.videoAnalysis.frames" :key="'vf_'+fi" class="va-frame" @click="lightboxUrl = 'data:image/jpeg;base64,' + f.frameB64">
+            <img :src="'data:image/jpeg;base64,' + f.frameB64" />
+            <div class="va-frame-info">
+              <span>{{ f.timestamp }}s</span>
+              <span :class="{ rising: f.waterChanged > 0.01, falling: f.waterChanged < -0.01 }">{{ (f.waterRatio * 100).toFixed(1) }}%</span>
+            </div>
+          </div>
+        </div>
+        <div v-if="chatStore.videoAnalysis.glmvAssessment" class="va-glmv">
+          <div class="va-glmv-title">🧠 AI场景分析</div>
+          <div class="va-glmv-body">
+            <span v-if="chatStore.videoAnalysis.glmvAssessment.water_type">类型: {{ chatStore.videoAnalysis.glmvAssessment.water_type }}</span>
+            <span v-if="chatStore.videoAnalysis.glmvAssessment.water_state">状态: {{ chatStore.videoAnalysis.glmvAssessment.water_state }}</span>
+            <span v-if="chatStore.videoAnalysis.glmvAssessment.risk_level">风险: {{ chatStore.videoAnalysis.glmvAssessment.risk_level }}级</span>
+          </div>
+          <div v-if="chatStore.videoAnalysis.summary" class="va-glmv-summary">{{ chatStore.videoAnalysis.summary }}</div>
+        </div>
+      </div>
+    </div>
+
     <div class="suggestions">
       <span
         v-for="s in suggestions" :key="s"
@@ -525,6 +634,10 @@ function closeExportMenu(e: MouseEvent) {
       <label class="input-btn" :class="{ active: !!pendingImage }" title="上传图片">
         {{ imgUploading ? '⏳' : '📷' }}
         <input type="file" accept="image/*" style="display:none" @change="handleImageSelect" :disabled="imgUploading" />
+      </label>
+      <label class="input-btn" :class="{ active: videoUploading }" title="上传视频分析">
+        {{ videoUploading ? '⏳' : '📹' }}
+        <input type="file" accept="video/*" style="display:none" @change="handleVideoSelect" :disabled="videoUploading" />
       </label>
       <input
         v-model="inputText"
@@ -1159,6 +1272,81 @@ function closeExportMenu(e: MouseEvent) {
 }
 .dc-conf { color: #94a3b8; white-space: nowrap; }
 .dc-summary { color: #cbd5e1; }
+
+.video-analysis-card {
+  margin: 8px 0;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 212, 255, .2);
+  background: rgba(0, 212, 255, .03);
+  overflow: hidden;
+}
+.va-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.va-icon { font-size: 18px; }
+.va-title { font-size: 14px; font-weight: 700; color: #67e8f9; }
+.va-trend-badge {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.va-trend-badge.rising { background: rgba(239,68,68,.15); color: #fca5a5; }
+.va-trend-badge.falling { background: rgba(34,197,94,.15); color: #86efac; }
+.va-trend-badge.stable { background: rgba(148,163,184,.15); color: #cbd5e1; }
+.va-body { padding: 12px 14px; }
+.va-stats { display: flex; gap: 10px; margin-bottom: 10px; }
+.va-stat {
+  flex: 1;
+  text-align: center;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(0,0,0,.25);
+}
+.va-stat-label { display: block; font-size: 10px; color: #94a3b8; }
+.va-stat-val { display: block; font-size: 15px; font-weight: 700; color: #67e8f9; }
+.va-frames {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+.va-frame {
+  flex-shrink: 0;
+  width: 120px;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,.08);
+  transition: all .15s;
+}
+.va-frame:hover { border-color: rgba(0,212,255,.4); }
+.va-frame img { width: 100%; height: 68px; object-fit: cover; display: block; }
+.va-frame-info {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 6px;
+  font-size: 10px;
+  color: #94a3b8;
+  background: rgba(0,0,0,.4);
+}
+.va-frame-info .rising { color: #fca5a5; }
+.va-frame-info .falling { color: #86efac; }
+.va-glmv {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(168, 85, 247, .06);
+  border: 1px solid rgba(168, 85, 247, .15);
+}
+.va-glmv-title { font-size: 12px; font-weight: 600; color: #c4b5fd; margin-bottom: 5px; }
+.va-glmv-body { display: flex; gap: 12px; font-size: 11px; color: #cbd5e1; flex-wrap: wrap; }
+.va-glmv-summary { font-size: 11px; color: #94a3b8; margin-top: 5px; }
 .th-line.done { color: var(--accent3); }
 .tool-badge {
   display: inline-flex;

@@ -27,6 +27,18 @@ export const useChatStore = defineStore('chat', () => {
 
   const disasterAssessment = ref<any>(null)
 
+  const videoAnalysis = ref<{
+    active: boolean
+    filename: string
+    duration: number
+    frames: { timestamp: number; waterRatio: number; waterChanged: number; frameB64: string }[]
+    maxWaterRatio: number
+    trend: string
+    trendDelta: number
+    glmvAssessment: any
+    summary: string
+  } | null>(null)
+
   const multiScenarioActive = ref(false)
   const multiScenarioName = ref('')
   const multiScenarioIcon = ref('')
@@ -153,6 +165,7 @@ export const useChatStore = defineStore('chat', () => {
     pipelineSteps.value = []
     pipelineActive.value = false
     disasterAssessment.value = null
+    videoAnalysis.value = null
     multiScenarioActive.value = false
     multiScenarioName.value = ''
     multiScenarioIcon.value = ''
@@ -197,6 +210,7 @@ export const useChatStore = defineStore('chat', () => {
     multiScenarioActive, multiScenarioName, multiScenarioIcon,
     scenarios, comparisonResult,
     disasterAssessment,
+    videoAnalysis,
     recentHistory,
     addUserMessage, addBotMessage, updateLastBotMessage,
     addThinkingLine, startThinking, closeThinking, markThinkingDone, clearThinking,
