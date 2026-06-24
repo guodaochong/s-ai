@@ -97,7 +97,10 @@ async def _resolve_image_prefix(message: str) -> tuple[str, list[dict]]:
     if not message.startswith("[img:"):
         return message, []
 
-    img_name = message[5:].strip().rstrip("]").strip()
+    img_match = re.match(r'\[img:(.+?)\]', message)
+    if not img_match:
+        return message, []
+    img_name = img_match.group(1)
     img_path = UPLOAD_IMG_DIR / img_name
     if not img_path.exists():
         return message, []
