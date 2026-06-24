@@ -38,7 +38,7 @@ from app.dispatcher import handle_internal_tool
 from app.pipeline import detect_pipeline, execute_pipeline, _extract_scenarios, execute_multi_scenario
 from app.llm import call_llm
 from app.mcp_client import cached_mcp_call
-from app.multimodal import analyze_image
+from app.multimodal import analyze_image, assess_disaster
 from app.router import route
 from app.store import MemoryStore
 from app.tools.generator import (
@@ -77,8 +77,20 @@ def _parse_history(raw: str) -> list[dict]:
         return []
 
 
+_DISASTER_KEYWORDS = re.compile(
+    r"灾情|灾害|淹没|洪涝|洪水|内涝|涨水|淹了|受灾|评估|损失|"
+    r"水位多深|淹多深|多深|救援|危险|损坏|倒塌|决堤|溃坝|管涌|"
+    r"积水|泡水|进水|受灾|应急|抢险|disaster|flood|damage"
+)
+
+
 async def _resolve_image_prefix(message: str) -> tuple[str, list[dict]]:
     """If the message starts with ``[img:...]``, run vision analysis and enrich the message.
+
+    When the message also contains disaster keywords (灾情/洪水/评估/...),
+    the specialized :func:`assess_disaster` is used instead of the generic
+    :func:`analyze_image`, and a ``disaster_assess`` SSE event is emitted
+    carrying the structured assessment.
 
     Returns ``(enriched_message, sse_events_to_emit)``.
     """
@@ -91,6 +103,33 @@ async def _resolve_image_prefix(message: str) -> tuple[str, list[dict]]:
         return message, []
 
     img_b64 = base64.b64encode(img_path.read_bytes()).decode()
+    user_note = message.replace(f"[img:{img_name}]", "").strip()
+
+    if _DISASTER_KEYWORDS.search(message):
+        assessment = await assess_disaster(img_b64, user_note)
+        events: list[dict] = [
+            {"type": "thinking_start", "agent": "vision", "label": "🚨 灾情智能评估"},
+        ]
+        if "error" in assessment:
+            events.append({"type": "thinking", "agent": "vision", "content": f"❌ {assessment['error']}"})
+        else:
+            sev = assessment.get("severity", 0)
+            dtype = assessment.get("disaster_type", "未知")
+            depth = assessment.get("water_depth_m", 0)
+            conf = assessment.get("confidence", 0)
+            events.append({"type": "thinking", "agent": "vision",
+                           "content": f"📋 类型:{dtype} | 等级:{sev}级 | 水深:{depth}m | 置信度:{conf:.0%}"})
+            events.append({"type": "disaster_assess", "assessment": assessment, "image": img_name})
+        events.append({"type": "thinking_end", "agent": "vision"})
+
+        summary = assessment.get("summary", assessment.get("error", "评估失败"))
+        enriched = (
+            f"用户上传了一张灾情照片({img_name})，GLM-4V完成了结构化评估。\n"
+            f"评估结果摘要：{summary}\n\n"
+            f"请基于评估结果给出专业的后续分析和建议。用户说明：{user_note or '请评估这张灾情照片'}"
+        )
+        return enriched, events
+
     analysis = await analyze_image(img_b64)
     events = [
         {"type": "thinking_start", "agent": "vision", "label": "🔍 图片分析"},
@@ -100,7 +139,7 @@ async def _resolve_image_prefix(message: str) -> tuple[str, list[dict]]:
     enriched = (
         f"请分析这张图片({img_name})的视觉内容。以下是AI的图片描述，请结合用户需求给出专业分析：\n"
         f"{analysis}\n[图片路径:{str(img_path)}]\n\n"
-        f"用户的原始说明：{message.replace(f'[img:{img_name}]', '').strip() or '请分析这张图片的内容'}"
+        f"用户的原始说明：{user_note or '请分析这张图片的内容'}"
     )
     return enriched, events
 
