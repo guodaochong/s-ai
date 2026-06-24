@@ -189,7 +189,16 @@ def _extract_rainfall(query: str) -> str:
     return ""
 
 
-def _build_args(tool: str, location: str, rainfall: str) -> dict[str, Any]:
+def _extract_bbox(query: str) -> list[float] | None:
+    m = re.search(r'\[(-?[\d.]+),(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)\]', query)
+    if m:
+        vals = [float(m.group(i)) for i in range(1, 5)]
+        if vals[2] > vals[0] and vals[3] > vals[1]:
+            return vals
+    return None
+
+
+def _build_args(tool: str, location: str, rainfall: str, bbox: list[float] | None = None) -> dict[str, Any]:
     args: dict[str, Any] = {}
     if tool == "dem_analyze":
         if location:
@@ -203,19 +212,27 @@ def _build_args(tool: str, location: str, rainfall: str) -> dict[str, Any]:
     elif tool == "flood_sim_3d":
         if location:
             args["location"] = location
+        if bbox:
+            args["bbox"] = bbox
         args["duration_h"] = 24
     elif tool == "flood_assessment":
         args["rainfall_mm"] = float(rainfall) if rainfall and rainfall.replace(".", "").isdigit() else 150
         if location:
             args["area_name"] = location
     elif tool == "flood_inundation_map":
-        if location:
+        if bbox:
+            args["bbox"] = bbox
+        elif location:
             args["location"] = location
     elif tool == "building_extract":
-        if location:
+        if bbox:
+            args["bbox"] = bbox
+        elif location:
             args["location"] = location
     elif tool == "precipitation_grid":
-        if location:
+        if bbox:
+            args["bbox"] = bbox
+        elif location:
             args["location"] = location
         args["forecast_mode"] = True
     elif tool == "watershed_delineate" or tool == "flow_accumulation":
@@ -259,6 +276,7 @@ async def execute_pipeline(
 
     t0 = time.time()
     rainfall = _extract_rainfall(query)
+    bbox = _extract_bbox(query)
 
     for i, step in enumerate(steps):
         tool: str = step["tool"]
@@ -267,7 +285,7 @@ async def execute_pipeline(
         yield sse({"type": "pipeline_step", "step_id": sid, "status": "running"})
         yield sse({"type": "thinking", "agent": "pipeline", "content": f"{step['icon']} 正在执行：{step['label']}（{sid}/{total}）"})
 
-        args = _build_args(tool, location, rainfall)
+        args = _build_args(tool, location, rainfall, bbox)
 
         t_step = time.time()
         try:

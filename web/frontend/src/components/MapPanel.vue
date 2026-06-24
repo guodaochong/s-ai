@@ -137,6 +137,7 @@ function triggerAnalysis(type: string) {
   const [w, s, e, n] = drawnBbox.value
   const bboxStr = `[${w},${s},${e},${n}]`
   const messages: Record<string, string> = {
+    pipeline: `对区域${bboxStr}进行暴雨洪水全链路推演`,
     flood: `分析区域${bboxStr}暴雨150mm会不会淹`,
     building: `识别区域${bboxStr}的建筑`,
     precip: `展示区域${bboxStr}的降雨过程`,
@@ -203,6 +204,7 @@ function addDemoLayer() {
       </div>
       <div class="dp-bbox">bbox: [{{ drawnBbox.map(v => v.toFixed(3)).join(', ') }}]</div>
       <div class="dp-actions">
+        <button class="dp-btn dp-pipeline" @click="triggerAnalysis('pipeline')">🤖 全链路推演</button>
         <button class="dp-btn" @click="triggerAnalysis('flood')">🌊 会淹吗？</button>
         <button class="dp-btn" @click="triggerAnalysis('building')">🏙️ 识别建筑</button>
         <button class="dp-btn" @click="triggerAnalysis('precip')">🌧️ 降雨过程</button>
@@ -548,5 +550,16 @@ function addDemoLayer() {
   background: rgba(0, 212, 255, 0.15);
   border-color: rgba(0, 212, 255, 0.4);
   color: #00d4ff;
+}
+.draw-panel .dp-pipeline {
+  border-color: rgba(0, 255, 136, 0.4);
+  background: rgba(0, 255, 136, 0.08);
+  color: #00ff88;
+  font-weight: 600;
+  grid-column: 1 / -1;
+}
+.draw-panel .dp-pipeline:hover {
+  background: rgba(0, 255, 136, 0.18);
+  border-color: rgba(0, 255, 136, 0.6);
 }
 </style>
