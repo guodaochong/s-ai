@@ -191,6 +191,8 @@ export const useChatStore = defineStore('chat', () => {
     totalTools, totalMs,
     lastExportData, allExportData, events, eventCount,
     pipelineName, pipelineSteps, pipelineActive,
+    multiScenarioActive, multiScenarioName, multiScenarioIcon,
+    scenarios, comparisonResult,
     recentHistory,
     addUserMessage, addBotMessage, updateLastBotMessage,
     addThinkingLine, startThinking, closeThinking, markThinkingDone, clearThinking,
