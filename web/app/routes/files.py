@@ -19,6 +19,7 @@ from app.config import DATA_DIR, UPLOAD_IMG_DIR
 from app.multimodal import analyze_image
 from app.video_analysis import analyze_video
 from app.report import generate_report
+from app.sam_segment import segment_and_analyze
 
 router = APIRouter()
 
@@ -127,3 +128,14 @@ async def generate_report_api(request: Request):
         user_query=body.get("user_query", ""),
     )
     return HTMLResponse(content=html)
+
+
+@router.post("/api/sam_segment")
+async def sam_segment_api(request: Request):
+    body = await request.json()
+    img_b64 = body.get("image_b64", "")
+    context = body.get("context", "")
+    if not img_b64:
+        return {"error": "Missing image_b64"}
+    result = await segment_and_analyze(img_b64, context)
+    return result
