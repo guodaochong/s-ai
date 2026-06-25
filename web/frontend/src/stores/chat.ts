@@ -43,6 +43,14 @@ export const useChatStore = defineStore('chat', () => {
   const cotActive = ref(false)
   const cotConclusion = ref('')
 
+  const segmentResult = ref<{
+    annotatedB64: string
+    regions: { id: number; type: string; status: string; description: string }[]
+    summary: string
+    regionCount: number
+    regionColors: { r: number; g: number; b: number }[]
+  } | null>(null)
+
   const multiScenarioActive = ref(false)
   const multiScenarioName = ref('')
   const multiScenarioIcon = ref('')
@@ -173,6 +181,7 @@ export const useChatStore = defineStore('chat', () => {
     cotSteps.value = []
     cotActive.value = false
     cotConclusion.value = ''
+    segmentResult.value = null
     multiScenarioActive.value = false
     multiScenarioName.value = ''
     multiScenarioIcon.value = ''
@@ -221,6 +230,7 @@ export const useChatStore = defineStore('chat', () => {
     cotSteps,
     cotActive,
     cotConclusion,
+    segmentResult,
     recentHistory,
     addUserMessage, addBotMessage, updateLastBotMessage,
     addThinkingLine, startThinking, closeThinking, markThinkingDone, clearThinking,

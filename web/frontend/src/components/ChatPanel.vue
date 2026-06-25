@@ -72,6 +72,10 @@ function removePendingImage() {
 
 function quickImageAction(action: string) {
   if (!pendingImage.value || chatStore.isStreaming) return
+  if (action === 'segment') {
+    handleSamSegment()
+    return
+  }
   const prompts: Record<string, string> = {
     disaster: '评估这张灾情照片的淹没情况和损失',
     reconstruct: '重建这个建筑的3D模型',
@@ -79,6 +83,44 @@ function quickImageAction(action: string) {
   }
   inputText.value = prompts[action] || ''
   handleSend()
+}
+
+async function handleSamSegment() {
+  if (!pendingImage.value || chatStore.isStreaming) return
+  const imgUrl = pendingImage.value.url
+  pendingImage.value = null
+  chatStore.isStreaming = true
+  chatStore.addBotMessage('🗺️ SAM地物分割分析中...')
+  try {
+    const resp = await fetch(imgUrl)
+    const blob = await resp.blob()
+    const reader = new FileReader()
+    const b64 = await new Promise<string>(resolve => {
+      reader.onload = () => resolve(reader.result.split(',')[1])
+      reader.readAsDataURL(blob)
+    })
+    const apiResp = await fetch('/api/sam_segment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_b64: b64, context: inputText.value.trim() }),
+    })
+    const data = await apiResp.json()
+    if (data.error) {
+      chatStore.addBotMessage(`⚠️ 分割失败: ${data.error}`)
+    } else {
+      chatStore.segmentResult = {
+        annotatedB64: data.annotated_b64,
+        regions: data.regions || [],
+        summary: data.summary || '',
+        regionCount: data.region_count || 0,
+        regionColors: data.region_colors || [],
+      }
+    }
+  } catch {
+    chatStore.addBotMessage('⚠️ SAM分割失败，请确保后端已启动')
+  } finally {
+    chatStore.isStreaming = false
+  }
 }
 
 async function handleVideoSelect(e: Event) {
@@ -641,6 +683,29 @@ function closeExportMenu(e: MouseEvent) {
       </div>
     </div>
 
+    <div v-if="chatStore.segmentResult" class="segment-card">
+      <div class="seg-header">
+        <span class="seg-icon">🗺️</span>
+        <span class="seg-title">SAM地物分割</span>
+        <span class="seg-badge">{{ chatStore.segmentResult.regionCount }}个区域</span>
+      </div>
+      <div class="seg-body">
+        <div v-if="chatStore.segmentResult.annotatedB64" class="seg-image" @click="lightboxUrl = 'data:image/jpeg;base64,' + chatStore.segmentResult.annotatedB64">
+          <img :src="'data:image/jpeg;base64,' + chatStore.segmentResult.annotatedB64" />
+          <div class="seg-image-overlay">🔍 点击放大</div>
+        </div>
+        <div v-if="chatStore.segmentResult.regions.length" class="seg-regions">
+          <div v-for="r in chatStore.segmentResult.regions" :key="'seg_'+r.id" class="seg-region">
+            <span class="seg-region-num">{{ r.id }}</span>
+            <span class="seg-region-type" :class="{ flooded: r.status && r.status.includes('淹') }">{{ r.type }}</span>
+            <span v-if="r.status && r.status !== '无'" class="seg-region-status" :class="{ flooded: r.status.includes('淹') }">{{ r.status }}</span>
+            <span class="seg-region-desc">{{ r.description }}</span>
+          </div>
+        </div>
+        <div v-if="chatStore.segmentResult.summary" class="seg-summary">{{ chatStore.segmentResult.summary }}</div>
+      </div>
+    </div>
+
     <div v-if="chatStore.cotSteps.length > 0" class="cot-card">
       <div class="cot-header">
         <span class="cot-icon">🗺️</span>
@@ -685,6 +750,7 @@ function closeExportMenu(e: MouseEvent) {
         </div>
         <span class="img-name">{{ pendingImage!.filename }}</span>
         <button class="img-quick img-quick-disaster" @click="quickImageAction('disaster')">🚨 灾情评估</button>
+        <button class="img-quick img-quick-sam" @click="quickImageAction('segment')">🗺️ 地物分割</button>
         <button class="img-quick" @click="quickImageAction('reconstruct')">🏗️ 3D重建</button>
         <button class="img-quick" @click="quickImageAction('analyze')">🔍 通用分析</button>
         <button class="img-remove" @click="removePendingImage">✕</button>
@@ -1499,6 +1565,80 @@ function closeExportMenu(e: MouseEvent) {
   font-size: 13px;
   color: #bbf7d0;
 }
+
+.segment-card {
+  margin: 8px 0;
+  border-radius: 12px;
+  border: 1px solid rgba(168, 85, 247, .2);
+  background: rgba(168, 85, 247, .03);
+  overflow: hidden;
+}
+.seg-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.seg-icon { font-size: 18px; }
+.seg-title { font-size: 14px; font-weight: 700; color: #c4b5fd; }
+.seg-badge {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(168, 85, 247, .15);
+  border: 1px solid rgba(168, 85, 247, .3);
+  color: #d8b4fe;
+}
+.seg-body { padding: 12px 14px; }
+.seg-image {
+  position: relative;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  max-height: 300px;
+}
+.seg-image img { width: 100%; max-height: 300px; object-fit: cover; display: block; }
+.seg-image-overlay {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  padding: 4px 10px; background: linear-gradient(transparent, rgba(0,0,0,.7));
+  color: #fff; font-size: 11px; opacity: 0; transition: opacity .2s;
+}
+.seg-image:hover .seg-image-overlay { opacity: 1; }
+.seg-regions { display: flex; flex-direction: column; gap: 4px; }
+.seg-region {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(0,0,0,.15);
+  font-size: 12px;
+}
+.seg-region-num {
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: rgba(168, 85, 247, .2); color: #c4b5fd;
+  font-size: 11px; font-weight: 700; flex-shrink: 0;
+}
+.seg-region-type { font-weight: 600; color: #e2e8f0; min-width: 50px; }
+.seg-region-status {
+  padding: 1px 6px; border-radius: 4px; font-size: 10px;
+  background: rgba(34, 197, 94, .1); color: #86efac;
+}
+.seg-region-status.flooded { background: rgba(239, 68, 68, .15); color: #fca5a5; }
+.seg-region-type.flooded { color: #fca5a5; }
+.seg-region-desc { color: #94a3b8; flex: 1; }
+.seg-summary {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(168, 85, 247, .06);
+  font-size: 12px;
+  color: #c4b5fd;
+}
 .th-line.done { color: var(--accent3); }
 .tool-badge {
   display: inline-flex;
@@ -1827,6 +1967,16 @@ function closeExportMenu(e: MouseEvent) {
   background: rgba(239, 68, 68, .2);
   border-color: rgba(239, 68, 68, .5);
   color: #fff;
+}
+.img-quick-sam {
+  border-color: rgba(168, 85, 247, .3);
+  background: rgba(168, 85, 247, .08);
+  color: #c4b5fd;
+  font-weight: 600;
+}
+.img-quick-sam:hover {
+  background: rgba(168, 85, 247, .2);
+  border-color: rgba(168, 85, 247, .5);
 }
 .input-btn.active {
   border-color: var(--accent);
